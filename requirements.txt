@@ -1,0 +1,25 @@
+# --- Web framework ---
+fastapi
+uvicorn[standard]
+
+# --- Config ---
+pydantic
+pydantic-settings
+python-dotenv
+
+# --- Database (Postgres + pgvector) ---
+sqlalchemy[asyncio]
+psycopg[binary]
+pgvector
+
+# --- LLM / embeddings ---
+anthropic            # generation (Claude)
+openai               # embeddings only
+
+# --- HTTP / parsing (SEC EDGAR) ---
+httpx
+beautifulsoup4
+lxml
+
+# --- Dev / eval ---
+pytest

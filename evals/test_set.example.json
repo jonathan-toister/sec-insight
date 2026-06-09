@@ -1,0 +1,12 @@
+[
+  {
+    "question": "What new risk factors did Apple add in its most recent 10-K versus the prior year?",
+    "expects_keywords": ["supply chain", "regulation"],
+    "company": "AAPL"
+  },
+  {
+    "question": "Summarize the main revenue drivers described in Microsoft's latest 10-K.",
+    "expects_keywords": ["cloud", "Azure"],
+    "company": "MSFT"
+  }
+]
