@@ -24,6 +24,7 @@ class ChunkResult(BaseModel):
     section: str | None
     text: str
     distance: float
+    highlights: list[str] = Field(default_factory=list)
 
 
 class AskResponse(BaseModel):

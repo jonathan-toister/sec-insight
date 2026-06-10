@@ -38,14 +38,19 @@ async def ask(
         k=request.k,
     )
 
-    answer, sources = await generate_answer(
+    answer, sources, highlights_map = await generate_answer(
         question=request.question,
         chunks=chunks,
     )
 
+    chunks_with_highlights = [
+        chunk.model_copy(update={"highlights": highlights_map.get(i + 1, [])})
+        for i, chunk in enumerate(chunks)
+    ]
+
     return AskResponse(
         answer=answer,
         sources=sources,
-        chunks=chunks,
+        chunks=chunks_with_highlights,
         hypothetical_document=hypothetical_doc,
     )
