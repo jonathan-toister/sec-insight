@@ -1,10 +1,13 @@
 """Answer generation with Claude."""
 import anthropic
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.schemas import ChunkResult
 
 _client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+
+_MAX_TURNS = 10
 
 _SYSTEM_PROMPT = """\
 You are a helpful assistant that explains SEC filings to everyday investors who \
@@ -31,6 +34,14 @@ _FORMAT_TOOL: anthropic.types.ToolParam = {
     "input_schema": {
         "type": "object",
         "properties": {
+            "response_type": {
+                "type": "string",
+                "enum": ["research", "conversational"],
+                "description": (
+                    "Use 'conversational' for greetings, thanks, or off-topic messages. "
+                    "Use 'research' for SEC filing questions that required searching."
+                ),
+            },
             "answer": {
                 "type": "string",
                 "description": "Plain-English answer with inline citations",
@@ -38,7 +49,8 @@ _FORMAT_TOOL: anthropic.types.ToolParam = {
             "chunk_highlights": {
                 "type": "array",
                 "description": (
-                    "Per-chunk highlights in the same order as the provided excerpts."
+                    "Per-chunk highlights in the same order as the provided excerpts. "
+                    "Empty list for conversational responses."
                 ),
                 "items": {
                     "type": "object",
@@ -60,9 +72,33 @@ _FORMAT_TOOL: anthropic.types.ToolParam = {
                 },
             },
         },
-        "required": ["answer", "chunk_highlights"],
+        "required": ["response_type", "answer", "chunk_highlights"],
     },
 }
+
+_AGENT_SYSTEM_PROMPT = """\
+You are an SEC filings assistant that helps investors understand company filings.
+
+For SEC filing questions:
+  1. Call search_filings to find relevant information (ticker is required — \
+extract it from the question).
+  2. If the results are empty, try rephrasing the query or inform the user \
+that the company may not be ingested.
+  3. Once you have enough context, call format_answer with \
+response_type="research".
+  4. Every factual claim must cite its source as [Company Form_Type FY####].
+  5. Write in plain, simple English. Briefly explain financial jargon in \
+parentheses the first time you use it.
+  6. End your answer with "Disclaimer: This is not investment advice."
+
+For conversational messages (greetings, thanks, off-topic):
+  Call format_answer directly with response_type="conversational", \
+chunk_highlights=[], and a friendly reply — no citations, no disclaimer.
+
+Never answer from your own knowledge about specific filing contents. \
+Always use search_filings first. If you cannot identify the company ticker \
+from the question, ask the user to clarify before searching.\
+"""
 
 
 def _format_chunks(chunks: list[ChunkResult]) -> str:
@@ -90,6 +126,79 @@ def _build_sources(chunks: list[ChunkResult]) -> list[str]:
             seen.add(cite)
             sources.append(cite)
     return sources
+
+
+async def run_agent(
+    question: str,
+    session: AsyncSession,
+) -> tuple[str, list[str], dict[int, list[str]], list[ChunkResult]]:
+    """
+    Agentic loop: Claude decides when to call search_filings; loops until it
+    calls format_answer or hits max turns.
+
+    Returns (answer, sources, highlights_map, all_chunks).
+    """
+    from app.tools.registry import TOOL_SCHEMAS, dispatch  # avoid circular import at module level
+
+    messages: list[dict] = [{"role": "user", "content": question}]
+    all_chunks: list[ChunkResult] = []
+
+    for _ in range(_MAX_TURNS):
+        response = await _client.messages.create(
+            model=settings.chat_model,
+            max_tokens=2048,
+            system=_AGENT_SYSTEM_PROMPT,
+            tools=[*TOOL_SCHEMAS, _FORMAT_TOOL],  # type: ignore[list-item]
+            tool_choice={"type": "auto"},
+            messages=messages,
+        )
+
+        if response.stop_reason == "end_turn":
+            text = next(
+                (b.text for b in response.content if hasattr(b, "text")), ""
+            )
+            return text, [], {}, []
+
+        tool_uses = [b for b in response.content if b.type == "tool_use"]
+        tool_results = []
+
+        for tu in tool_uses:
+            if tu.name == "format_answer":
+                tool_input: dict = tu.input  # type: ignore[union-attr]
+                answer = tool_input["answer"].strip()
+                if tool_input.get("response_type") == "conversational":
+                    return answer, [], {}, []
+
+                highlights_map: dict[int, list[str]] = {
+                    item["chunk_index"]: item.get("highlights", [])
+                    for item in tool_input.get("chunk_highlights", [])
+                    if isinstance(item.get("chunk_index"), int)
+                }
+                return answer, _build_sources(all_chunks), highlights_map, all_chunks
+
+            try:
+                content = await dispatch(
+                    tu.name,
+                    tu.input,  # type: ignore[union-attr]
+                    session,
+                    all_chunks,
+                    len(all_chunks),
+                )
+            except ValueError as exc:
+                content = f"Tool error: {exc}"
+
+            tool_results.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": tu.id,
+                    "content": content,
+                }
+            )
+
+        messages.append({"role": "assistant", "content": response.content})
+        messages.append({"role": "user", "content": tool_results})
+
+    raise RuntimeError("Agent loop exceeded max turns without a final answer.")
 
 
 async def generate_answer(

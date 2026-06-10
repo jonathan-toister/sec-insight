@@ -31,4 +31,4 @@ class AskResponse(BaseModel):
     answer: str
     sources: list[str]
     chunks: list[ChunkResult]
-    hypothetical_document: str
+    hypothetical_document: str | None = None
