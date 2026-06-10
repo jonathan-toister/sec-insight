@@ -26,7 +26,7 @@ class Company(Base):
 
 class Filing(Base):
     __tablename__ = "filings"
-    __table_args__ = (UniqueConstraint("cik", "form_type", "fiscal_year"),)
+    __table_args__ = (UniqueConstraint("url"),)
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     cik: Mapped[str] = mapped_column(Text, nullable=False)

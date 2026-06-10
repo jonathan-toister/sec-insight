@@ -13,7 +13,7 @@ CREATE EXTENSION IF NOT EXISTS vector;
 --   fiscal_year  INT,
 --   url          TEXT NOT NULL,
 --   filed_at     DATE,
---   UNIQUE (cik, form_type, fiscal_year)
+--   UNIQUE (url)
 -- );
 --
 -- CREATE TABLE chunks (

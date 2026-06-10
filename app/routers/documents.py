@@ -6,7 +6,7 @@ GET  /filings                    — list what's indexed
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
@@ -25,8 +25,9 @@ async def ingest_company(
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """
-    Pull and index the most recent 10-K and 10-Q filings for a company.
-    Safe to re-run: already-indexed filings are skipped (deduplicated by URL).
+    Pull and index up to `limit` NEW filings for a company.
+    Fetches a larger window from EDGAR so already-indexed filings don't eat
+    into the limit — re-running always makes forward progress.
     """
     ticker = ticker.upper()
 
@@ -35,8 +36,12 @@ async def ingest_company(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
+    already_indexed = await session.scalar(
+        select(func.count()).where(Filing.cik == cik)
+    )
+    fetch_limit = (already_indexed or 0) + limit
     filing_metas = await list_filings(
-        cik, company_name, ticker, form_types=["10-K", "10-Q"], limit=limit
+        cik, company_name, ticker, form_types=["10-K", "10-Q"], limit=fetch_limit
     )
 
     if not filing_metas:
@@ -46,6 +51,9 @@ async def ingest_company(
     skipped = 0
 
     for meta in filing_metas:
+        if ingested >= limit:
+            break
+
         # Dedup by URL — handles both 10-K (one/year) and 10-Q (multiple/year)
         existing = await session.scalar(
             select(Filing.id).where(Filing.url == meta.url)
