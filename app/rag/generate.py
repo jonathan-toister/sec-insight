@@ -1,9 +1,13 @@
 """Answer generation with Claude."""
+import logging
+
 import anthropic
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.schemas import ChunkResult
+
+_logger = logging.getLogger(__name__)
 
 _client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
@@ -100,6 +104,45 @@ Always use search_filings first. If you cannot identify the company ticker \
 from the question, ask the user to clarify before searching.\
 """
 
+# Cached system prompt — stable across all turns, only charged once per cache TTL.
+_CACHED_SYSTEM: list[dict] = [
+    {"type": "text", "text": _AGENT_SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}
+]
+
+
+def _log_usage(response: anthropic.types.Message, label: str = "turn") -> None:
+    u = response.usage
+    _logger.info(
+        "token_usage label=%s model=%s input=%d output=%d cache_read=%d cache_write=%d",
+        label,
+        response.model,
+        u.input_tokens,
+        u.output_tokens,
+        getattr(u, "cache_read_input_tokens", 0),
+        getattr(u, "cache_creation_input_tokens", 0),
+    )
+
+
+def _tag_last_for_cache(messages: list[dict]) -> list[dict]:
+    """Return messages with cache_control on the last content block of the last message."""
+    if not messages:
+        return messages
+    out = list(messages)
+    last = out[-1]
+    content = last["content"]
+    if isinstance(content, str):
+        out[-1] = {
+            **last,
+            "content": [{"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}],
+        }
+    elif isinstance(content, list) and content:
+        blocks = list(content)
+        tail = blocks[-1]
+        if isinstance(tail, dict):
+            blocks[-1] = {**tail, "cache_control": {"type": "ephemeral"}}
+        out[-1] = {**last, "content": blocks}
+    return out
+
 
 def _format_chunks(chunks: list[ChunkResult]) -> str:
     parts = []
@@ -140,18 +183,25 @@ async def run_agent(
     """
     from app.tools.registry import TOOL_SCHEMAS, dispatch  # avoid circular import at module level
 
+    # Cache the tool schemas — stable across turns; last tool carries the marker.
+    tools_with_cache = [
+        *TOOL_SCHEMAS,
+        {**_FORMAT_TOOL, "cache_control": {"type": "ephemeral"}},
+    ]
+
     messages: list[dict] = [{"role": "user", "content": question}]
     all_chunks: list[ChunkResult] = []
 
-    for _ in range(_MAX_TURNS):
+    for turn in range(_MAX_TURNS):
         response = await _client.messages.create(
             model=settings.chat_model,
             max_tokens=2048,
-            system=_AGENT_SYSTEM_PROMPT,
-            tools=[*TOOL_SCHEMAS, _FORMAT_TOOL],  # type: ignore[list-item]
+            system=_CACHED_SYSTEM,  # type: ignore[arg-type]
+            tools=tools_with_cache,  # type: ignore[list-item]
             tool_choice={"type": "auto"},
-            messages=messages,
+            messages=_tag_last_for_cache(messages),  # type: ignore[arg-type]
         )
+        _log_usage(response, label=f"turn={turn}")
 
         if response.stop_reason == "end_turn":
             text = next(

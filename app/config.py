@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""          # generation (Claude)
     openai_api_key: str = ""             # embeddings only (text-embedding-3-small)
     chat_model: str = "claude-sonnet-4-6"
+    hyde_model: str = "claude-haiku-4-5-20251001"
     embedding_model: str = "text-embedding-3-small"
     embedding_dim: int = 1536
 

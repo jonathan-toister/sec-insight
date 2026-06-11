@@ -2,6 +2,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ingest.embed import embed_texts
+from app.rag.hyde import generate_hypothetical_document
 from app.rag.retrieve import retrieve
 from app.schemas import ChunkResult, FilingFilter
 
@@ -75,25 +76,39 @@ def _validate_search_args(args: dict) -> dict:
     }
 
 
-def _format_result_chunks(chunks: list[ChunkResult], start_index: int) -> str:
-    parts = []
-    for i, chunk in enumerate(chunks, start=start_index):
-        header = f"[{i}] {chunk.company} {chunk.form_type}"
-        if chunk.fiscal_year:
-            header += f" FY{chunk.fiscal_year}"
-        if chunk.section:
-            header += f" — {chunk.section}"
-        parts.append(f"{header}\n{chunk.text}")
-    return "\n\n".join(parts)
+def _format_result_chunks(
+    chunks: list[ChunkResult],
+    start_index: int,
+    seen: dict[int, int],  # chunk_id -> display index already shown
+) -> tuple[list[ChunkResult], str]:
+    """Return (new_chunks_only, formatted_text). Deduplicates by chunk_id."""
+    parts: list[str] = []
+    new_chunks: list[ChunkResult] = []
+    for chunk in chunks:
+        if chunk.chunk_id in seen:
+            parts.append(f"[already shown as [{seen[chunk.chunk_id]}]]")
+        else:
+            idx = start_index + len(new_chunks)
+            seen[chunk.chunk_id] = idx
+            header = f"[{idx}] {chunk.company} {chunk.form_type}"
+            if chunk.fiscal_year:
+                header += f" FY{chunk.fiscal_year}"
+            if chunk.section:
+                header += f" — {chunk.section}"
+            parts.append(f"{header}\n{chunk.text}")
+            new_chunks.append(chunk)
+    return new_chunks, "\n\n".join(parts)
 
 
 async def handle_search_filings(
     args: dict,
     session: AsyncSession,
     start_index: int = 1,
+    seen: dict[int, int] | None = None,
 ) -> tuple[list[ChunkResult], str]:
-    """Returns (new_chunks, tool_result_content)."""
-    embeddings = await embed_texts([args["query"]])
+    """Returns (new_chunks, tool_result_content). Deduplicates chunks via seen."""
+    hyde_doc = await generate_hypothetical_document(args["query"])
+    embeddings = await embed_texts([hyde_doc])
     filters = FilingFilter(
         ticker=args["ticker"],
         form_type=args.get("form_type"),
@@ -112,7 +127,7 @@ async def handle_search_filings(
             "Try different search terms, or check whether this company has been ingested."
         )
 
-    return chunks, _format_result_chunks(chunks, start_index=start_index)
+    return _format_result_chunks(chunks, start_index=start_index, seen=seen or {})
 
 
 async def dispatch(
@@ -129,8 +144,9 @@ async def dispatch(
     """
     if tool_name == "search_filings":
         validated = _validate_search_args(args)
+        seen = {chunk.chunk_id: i + 1 for i, chunk in enumerate(chunk_accumulator)}
         new_chunks, content = await handle_search_filings(
-            validated, session, start_index=chunk_offset + 1
+            validated, session, start_index=chunk_offset + 1, seen=seen
         )
         chunk_accumulator.extend(new_chunks)
         return content

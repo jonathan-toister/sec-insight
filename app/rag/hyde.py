@@ -6,9 +6,13 @@ embed that passage. This aligns the query embedding with document-space rather
 than question-space, significantly improving cosine similarity against real
 10-K/10-Q text.
 """
+import logging
+
 import anthropic
 
 from app.config import settings
+
+_logger = logging.getLogger(__name__)
 
 _client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
@@ -38,9 +42,16 @@ async def generate_hypothetical_document(question: str) -> str:
     against financial filing text.
     """
     message = await _client.messages.create(
-        model=settings.chat_model,
-        max_tokens=256,
+        model=settings.hyde_model,
+        max_tokens=200,
         system=_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": _USER_TEMPLATE.format(question=question)}],
+    )
+    u = message.usage
+    _logger.info(
+        "token_usage label=hyde model=%s input=%d output=%d",
+        message.model,
+        u.input_tokens,
+        u.output_tokens,
     )
     return message.content[0].text.strip()
