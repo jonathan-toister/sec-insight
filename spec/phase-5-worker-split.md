@@ -30,7 +30,7 @@ benefit at none of the cost.
    - Link pending ingest jobs to their `conversation_id` (already persisted from
      phase 4) so a later turn can answer the original question once ingestion
      completes.
-4. **docker-compose:** grows to `db`, `redis`, `api`, `worker` — same codebase,
+4. **Deployment:** `api` and `worker` as separate processes — same codebase,
    two entrypoints (`uvicorn app.main:app` and the arq worker).
 5. Idempotency still holds: re-ingesting an existing filing is a no-op thanks to
    the unique constraint.
@@ -40,4 +40,4 @@ benefit at none of the cost.
 From chat: ask about a missing filing → the agent offers to ingest → user says
 yes → job is enqueued and runs in the worker → a later turn (same
 `conversation_id`) confirms completion and answers the original question with
-citations. `docker compose up` brings up all four services.
+citations. Starting the API and worker processes brings up all components.

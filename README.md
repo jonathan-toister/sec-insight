@@ -25,10 +25,7 @@ pip install -r requirements.txt
 cp .env.example .env          # then fill in ANTHROPIC_API_KEY + OPENAI_API_KEY
                               # and set SEC_USER_AGENT to "Your Name your@email"
 
-# 3. Database (Postgres + pgvector)
-docker compose up -d          # starts Postgres on localhost:5432
-
-# 4. Run the API
+# 3. Run the API
 uvicorn app.main:app --reload # http://localhost:8000/health  and  /docs
 ```
 

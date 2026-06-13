@@ -25,7 +25,7 @@ differentiators over the option that just makes a nicer chatbot.
 
 - **Language:** Python 3.11+
 - **API:** FastAPI (run: `uvicorn app.main:app --reload`)
-- **DB:** PostgreSQL + pgvector (via Docker, see `docker-compose.yml`)
+- **DB:** PostgreSQL + pgvector (external; set `DATABASE_URL` in `.env`)
 - **ORM:** SQLAlchemy 2.x, `psycopg` (v3) driver
 - **Generation:** Anthropic Claude (model in `settings.chat_model`)
 - **Embeddings:** OpenAI `text-embedding-3-small` (1536 dims) — embeddings ONLY

@@ -22,12 +22,6 @@ Then edit `.env`:
 - `OPENAI_API_KEY` — from platform.openai.com (embeddings only).
 - `SEC_USER_AGENT` — set to `"Your Name your@email.com"` (SEC requires this).
 
-Start the database (needs Docker Desktop running):
-
-```bash
-docker compose up -d
-```
-
 Sanity check the API skeleton:
 
 ```bash
