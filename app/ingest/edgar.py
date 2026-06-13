@@ -20,10 +20,19 @@ _REQUEST_DELAY = 0.12  # stay well under the 10 req/sec SEC limit
 
 
 @dataclass
-class FilingMeta:
+class CompanyInfo:
     cik: str
-    company: str
     ticker: str
+    name: str
+    sic: str | None
+    sic_description: str | None
+    state_of_incorporation: str | None
+    exchanges: str | None  # comma-separated
+    entity_type: str | None
+
+
+@dataclass
+class FilingMeta:
     form_type: str
     fiscal_year: int | None
     url: str
@@ -50,14 +59,13 @@ async def get_cik(ticker: str) -> tuple[str, str]:
 
 async def list_filings(
     cik: str,
-    company: str,
     ticker: str,
     form_types: list[str] | None = None,
     limit: int = 5,
-) -> list[FilingMeta]:
+) -> tuple[CompanyInfo, list[FilingMeta]]:
     """
-    List recent filings for a company from the EDGAR submissions API.
-    Returns up to `limit` filings, newest first.
+    Fetch company info and recent filings from the EDGAR submissions API.
+    Returns (CompanyInfo, filings) — up to `limit` filings, newest first.
     """
     if form_types is None:
         form_types = ["10-K", "10-Q"]
@@ -67,7 +75,21 @@ async def list_filings(
         resp = await client.get(f"{_DATA_BASE}/submissions/CIK{cik}.json")
         resp.raise_for_status()
 
-    recent = resp.json().get("filings", {}).get("recent", {})
+    data = resp.json()
+
+    exchanges_list: list[str] = data.get("exchanges", []) or []
+    company_info = CompanyInfo(
+        cik=cik,
+        ticker=ticker,
+        name=data.get("name", ""),
+        sic=str(data["sic"]) if data.get("sic") else None,
+        sic_description=data.get("sicDescription") or None,
+        state_of_incorporation=data.get("stateOfIncorporation") or None,
+        exchanges=",".join(exchanges_list) if exchanges_list else None,
+        entity_type=data.get("entityType") or None,
+    )
+
+    recent = data.get("filings", {}).get("recent", {})
     forms = recent.get("form", [])
     filing_dates = recent.get("filingDate", [])
     report_dates = recent.get("reportDate", [])
@@ -100,9 +122,6 @@ async def list_filings(
 
         results.append(
             FilingMeta(
-                cik=cik,
-                company=company,
-                ticker=ticker,
                 form_type=form,
                 fiscal_year=fiscal_year,
                 url=url,
@@ -113,7 +132,7 @@ async def list_filings(
         if len(results) >= limit:
             break
 
-    return results
+    return company_info, results
 
 
 async def download_filing(url: str) -> str:

@@ -2,7 +2,7 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Chunk, Filing
+from app.models import Chunk, Company, Filing
 from app.schemas import ChunkResult, FilingFilter
 
 
@@ -14,7 +14,7 @@ async def retrieve(
 ) -> list[ChunkResult]:
     """
     Find the k most similar chunks to `embedding` using pgvector cosine distance.
-    Joins with the filings table to return full citation metadata in one query.
+    Joins with filings and companies to return full citation metadata in one query.
     """
     stmt = (
         select(
@@ -22,13 +22,14 @@ async def retrieve(
             Chunk.filing_id,
             Chunk.section,
             Chunk.text,
-            Filing.company,
-            Filing.ticker,
+            Company.name.label("company"),
+            Company.ticker,
             Filing.form_type,
             Filing.fiscal_year,
             Chunk.embedding.cosine_distance(embedding).label("distance"),
         )
         .join(Filing, Chunk.filing_id == Filing.id)
+        .join(Company, Filing.company_id == Company.id)
         .where(Chunk.embedding.is_not(None))
         .order_by(Chunk.embedding.cosine_distance(embedding))
         .limit(k)
@@ -36,7 +37,7 @@ async def retrieve(
 
     if filters:
         if filters.ticker:
-            stmt = stmt.where(Filing.ticker == filters.ticker)
+            stmt = stmt.where(Company.ticker == filters.ticker)
         if filters.form_type:
             stmt = stmt.where(Filing.form_type == filters.form_type)
         if filters.fiscal_year:

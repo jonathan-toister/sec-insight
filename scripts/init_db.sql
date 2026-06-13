@@ -4,12 +4,22 @@ CREATE EXTENSION IF NOT EXISTS vector;
 
 -- Reference schema (Claude Code can generate the real version via SQLAlchemy):
 --
+-- CREATE TABLE companies (
+--   id                    BIGSERIAL PRIMARY KEY,
+--   ticker                TEXT NOT NULL UNIQUE,
+--   cik                   TEXT NOT NULL UNIQUE,
+--   name                  TEXT NOT NULL,
+--   sic                   TEXT,            -- SIC code, e.g. "7372"
+--   sic_description       TEXT,            -- e.g. "Prepackaged Software"
+--   state_of_incorporation TEXT,           -- e.g. "DE"
+--   exchanges             TEXT,            -- comma-separated, e.g. "NASDAQ"
+--   entity_type           TEXT             -- e.g. "Operating Company"
+-- );
+--
 -- CREATE TABLE filings (
 --   id           BIGSERIAL PRIMARY KEY,
---   cik          TEXT NOT NULL,
---   company      TEXT NOT NULL,
---   ticker       TEXT,
---   form_type    TEXT NOT NULL,        -- '10-K', '10-Q'
+--   company_id   BIGINT NOT NULL REFERENCES companies(id),
+--   form_type    TEXT NOT NULL,            -- '10-K', '10-Q'
 --   fiscal_year  INT,
 --   url          TEXT NOT NULL,
 --   filed_at     DATE,

@@ -19,7 +19,11 @@ class Company(Base):
     ticker: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
     cik: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
-    sector: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sic: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sic_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    state_of_incorporation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    exchanges: Mapped[str | None] = mapped_column(Text, nullable=True)
+    entity_type: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     filings: Mapped[list["Filing"]] = relationship(back_populates="company_rel")
 
@@ -29,18 +33,15 @@ class Filing(Base):
     __table_args__ = (UniqueConstraint("url"),)
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    cik: Mapped[str] = mapped_column(Text, nullable=False)
-    company: Mapped[str] = mapped_column(Text, nullable=False)
-    ticker: Mapped[str | None] = mapped_column(Text, nullable=True)
+    company_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("companies.id"), nullable=False
+    )
     form_type: Mapped[str] = mapped_column(Text, nullable=False)
     fiscal_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
     url: Mapped[str] = mapped_column(Text, nullable=False)
     filed_at: Mapped[date | None] = mapped_column(Date, nullable=True)
-    company_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("companies.id"), nullable=True
-    )
 
-    company_rel: Mapped["Company | None"] = relationship(back_populates="filings")
+    company_rel: Mapped["Company"] = relationship(back_populates="filings")
     chunks: Mapped[list["Chunk"]] = relationship(back_populates="filing")
 
 

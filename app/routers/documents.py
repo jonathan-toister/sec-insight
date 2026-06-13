@@ -13,9 +13,35 @@ from app.db import get_session
 from app.ingest.chunk import split_text
 from app.ingest.edgar import download_filing, get_cik, list_filings
 from app.ingest.embed import embed_texts
-from app.models import Chunk, Filing
+from app.models import Chunk, Company, Filing
 
 router = APIRouter(tags=["filings"])
+
+
+async def _upsert_company(session: AsyncSession, info: Any) -> Company:
+    """Insert or update the Company row for the given CompanyInfo."""
+    company = await session.scalar(select(Company).where(Company.cik == info.cik))
+    if company is None:
+        company = Company(
+            ticker=info.ticker,
+            cik=info.cik,
+            name=info.name,
+            sic=info.sic,
+            sic_description=info.sic_description,
+            state_of_incorporation=info.state_of_incorporation,
+            exchanges=info.exchanges,
+            entity_type=info.entity_type,
+        )
+        session.add(company)
+        await session.flush()
+    else:
+        company.name = info.name
+        company.sic = info.sic
+        company.sic_description = info.sic_description
+        company.state_of_incorporation = info.state_of_incorporation
+        company.exchanges = info.exchanges
+        company.entity_type = info.entity_type
+    return company
 
 
 @router.post("/companies/{ticker}/ingest", status_code=202)
@@ -32,20 +58,25 @@ async def ingest_company(
     ticker = ticker.upper()
 
     try:
-        cik, company_name = await get_cik(ticker)
+        cik, _ = await get_cik(ticker)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
     already_indexed = await session.scalar(
-        select(func.count()).where(Filing.cik == cik)
-    )
-    fetch_limit = (already_indexed or 0) + limit
-    filing_metas = await list_filings(
-        cik, company_name, ticker, form_types=["10-K", "10-Q"], limit=fetch_limit
+        select(func.count(Filing.id))
+        .join(Company, Filing.company_id == Company.id)
+        .where(Company.cik == cik)
+    ) or 0
+    fetch_limit = already_indexed + limit
+
+    company_info, filing_metas = await list_filings(
+        cik, ticker, form_types=["10-K", "10-Q"], limit=fetch_limit
     )
 
     if not filing_metas:
         return {"ticker": ticker, "ingested": 0, "skipped": 0, "message": "No filings found"}
+
+    company = await _upsert_company(session, company_info)
 
     ingested = 0
     skipped = 0
@@ -54,7 +85,6 @@ async def ingest_company(
         if ingested >= limit:
             break
 
-        # Dedup by URL — handles both 10-K (one/year) and 10-Q (multiple/year)
         existing = await session.scalar(
             select(Filing.id).where(Filing.url == meta.url)
         )
@@ -69,16 +99,14 @@ async def ingest_company(
             continue
 
         filing = Filing(
-            cik=meta.cik,
-            company=meta.company,
-            ticker=meta.ticker,
+            company_id=company.id,
             form_type=meta.form_type,
             fiscal_year=meta.fiscal_year,
             url=meta.url,
             filed_at=meta.filed_at,
         )
         session.add(filing)
-        await session.flush()  # assign filing.id without committing yet
+        await session.flush()
 
         raw_chunks = split_text(text)
         embeddings = await embed_texts([c.text for c in raw_chunks])
@@ -99,7 +127,7 @@ async def ingest_company(
 
     return {
         "ticker": ticker,
-        "company": company_name,
+        "company": company.name,
         "ingested": ingested,
         "skipped": skipped,
         "total_found": len(filing_metas),
@@ -115,13 +143,16 @@ async def list_indexed_filings(
         await session.execute(
             select(
                 Filing.id,
-                Filing.ticker,
-                Filing.company,
+                Company.ticker,
+                Company.name,
+                Company.sic_description,
                 Filing.form_type,
                 Filing.fiscal_year,
                 Filing.filed_at,
                 Filing.url,
-            ).order_by(Filing.ticker, Filing.form_type, Filing.fiscal_year.desc().nulls_last())
+            )
+            .join(Company, Filing.company_id == Company.id)
+            .order_by(Company.ticker, Filing.form_type, Filing.fiscal_year.desc().nulls_last())
         )
     ).all()
 
@@ -129,7 +160,8 @@ async def list_indexed_filings(
         {
             "id": r.id,
             "ticker": r.ticker,
-            "company": r.company,
+            "company": r.name,
+            "sector": r.sic_description,
             "form_type": r.form_type,
             "fiscal_year": r.fiscal_year,
             "filed_at": r.filed_at.isoformat() if r.filed_at else None,
