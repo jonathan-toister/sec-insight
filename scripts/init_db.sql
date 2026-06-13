@@ -36,3 +36,25 @@ CREATE EXTENSION IF NOT EXISTS vector;
 -- );
 CREATE INDEX IF NOT EXISTS chunks_embedding_hnsw_idx
     ON chunks USING hnsw (embedding vector_cosine_ops);
+--
+-- CREATE TABLE conversations (
+--   id         BIGSERIAL PRIMARY KEY,
+--   title      TEXT,                          -- first question, truncated to 200 chars
+--   created_at TIMESTAMPTZ DEFAULT now(),
+--   updated_at TIMESTAMPTZ DEFAULT now()
+-- );
+--
+-- CREATE TABLE messages (
+--   id                BIGSERIAL PRIMARY KEY,
+--   conversation_id   BIGINT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+--   seq               INT NOT NULL,           -- 0-based order within conversation
+--   role              TEXT NOT NULL,          -- 'user' | 'assistant'
+--   content           TEXT NOT NULL,          -- question or final answer text
+--   created_at        TIMESTAMPTZ DEFAULT now(),
+--   input_tokens      INT,                    -- assistant messages only
+--   output_tokens     INT,
+--   cache_read_tokens INT,
+--   cache_write_tokens INT,
+--   model             TEXT,
+--   latency_ms        INT
+-- );

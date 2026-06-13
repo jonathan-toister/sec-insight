@@ -4,7 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.ingest.embed import embed_texts
 from app.rag.hyde import generate_hypothetical_document
 from app.rag.retrieve import retrieve
-from app.schemas import ChunkResult, FilingFilter
+from app.rag.retrieve import FilingFilter
+from app.schemas import ChunkResult
 
 TOOL_SCHEMAS: list[dict] = [
     {

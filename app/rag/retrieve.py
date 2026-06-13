@@ -1,9 +1,16 @@
 """Vector retrieval over the chunks table (pgvector)."""
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Chunk, Company, Filing
-from app.schemas import ChunkResult, FilingFilter
+from app.schemas import ChunkResult
+
+
+class FilingFilter(BaseModel):
+    ticker: str | None = None
+    form_type: str | None = None
+    fiscal_year: int | None = None
 
 
 async def retrieve(

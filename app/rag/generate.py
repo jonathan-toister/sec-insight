@@ -1,5 +1,6 @@
 """Answer generation with Claude."""
 import logging
+import time
 
 import anthropic
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -171,26 +172,46 @@ def _build_sources(chunks: list[ChunkResult]) -> list[str]:
     return sources
 
 
+def _accumulate_usage(totals: dict, response: anthropic.types.Message) -> None:
+    u = response.usage
+    totals["input_tokens"] += u.input_tokens
+    totals["output_tokens"] += u.output_tokens
+    totals["cache_read_tokens"] += getattr(u, "cache_read_input_tokens", 0)
+    totals["cache_write_tokens"] += getattr(u, "cache_creation_input_tokens", 0)
+    totals["model"] = response.model
+
+
 async def run_agent(
     question: str,
     session: AsyncSession,
-) -> tuple[str, list[str], dict[int, list[str]], list[ChunkResult]]:
+    prior_messages: list[dict] | None = None,
+) -> tuple[str, list[str], dict[int, list[str]], list[ChunkResult], dict]:
     """
     Agentic loop: Claude decides when to call search_filings; loops until it
     calls format_answer or hits max turns.
 
-    Returns (answer, sources, highlights_map, all_chunks).
+    Returns (answer, sources, highlights_map, all_chunks, usage).
+    usage keys: input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+                model, latency_ms.
     """
     from app.tools.registry import TOOL_SCHEMAS, dispatch  # avoid circular import at module level
 
-    # Cache the tool schemas — stable across turns; last tool carries the marker.
     tools_with_cache = [
         *TOOL_SCHEMAS,
         {**_FORMAT_TOOL, "cache_control": {"type": "ephemeral"}},
     ]
 
-    messages: list[dict] = [{"role": "user", "content": question}]
+    messages: list[dict] = list(prior_messages or [])
+    messages.append({"role": "user", "content": question})
     all_chunks: list[ChunkResult] = []
+    usage: dict = {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "model": settings.chat_model,
+    }
+    t_start = time.perf_counter()
 
     for turn in range(_MAX_TURNS):
         response = await _client.messages.create(
@@ -202,12 +223,14 @@ async def run_agent(
             messages=_tag_last_for_cache(messages),  # type: ignore[arg-type]
         )
         _log_usage(response, label=f"turn={turn}")
+        _accumulate_usage(usage, response)
 
         if response.stop_reason == "end_turn":
             text = next(
                 (b.text for b in response.content if hasattr(b, "text")), ""
             )
-            return text, [], {}, []
+            usage["latency_ms"] = int((time.perf_counter() - t_start) * 1000)
+            return text, [], {}, [], usage
 
         tool_uses = [b for b in response.content if b.type == "tool_use"]
         tool_results = []
@@ -216,15 +239,16 @@ async def run_agent(
             if tu.name == "format_answer":
                 tool_input: dict = tu.input  # type: ignore[union-attr]
                 answer = tool_input["answer"].strip()
+                usage["latency_ms"] = int((time.perf_counter() - t_start) * 1000)
                 if tool_input.get("response_type") == "conversational":
-                    return answer, [], {}, []
+                    return answer, [], {}, [], usage
 
                 highlights_map: dict[int, list[str]] = {
                     item["chunk_index"]: item.get("highlights", [])
                     for item in tool_input.get("chunk_highlights", [])
                     if isinstance(item.get("chunk_index"), int)
                 }
-                return answer, _build_sources(all_chunks), highlights_map, all_chunks
+                return answer, _build_sources(all_chunks), highlights_map, all_chunks, usage
 
             try:
                 content = await dispatch(

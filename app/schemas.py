@@ -2,16 +2,9 @@
 from pydantic import BaseModel, Field
 
 
-class FilingFilter(BaseModel):
-    ticker: str | None = None
-    form_type: str | None = None
-    fiscal_year: int | None = None
-
-
 class AskRequest(BaseModel):
     question: str = Field(..., min_length=3, max_length=2000)
-    filters: FilingFilter = Field(default_factory=FilingFilter)
-    k: int = Field(default=6, ge=1, le=20)
+    conversation_id: int | None = None
 
 
 class ChunkResult(BaseModel):
@@ -31,4 +24,5 @@ class AskResponse(BaseModel):
     answer: str
     sources: list[str]
     chunks: list[ChunkResult]
+    conversation_id: int
     hypothetical_document: str | None = None
