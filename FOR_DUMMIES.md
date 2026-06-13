@@ -66,19 +66,27 @@ You send:
 ```json
 {
   "question": "What were Apple's biggest risks in 2023?",
-  "filters": { "ticker": "AAPL", "form_type": "10-K" }
+  "conversation_id": 42
 }
 ```
+
+`conversation_id` is optional — omit it to start a new conversation, or pass one
+returned from a previous call to continue where you left off.
 
 You get back:
 ```json
 {
-  "answer": "Apple's biggest risks included... [1]",
-  "sources": [{ "filing": "AAPL 10-K 2023", "section": "Item 1A" }]
+  "answer": "Apple's biggest risks included... [Apple Inc. 10-K FY2023]",
+  "sources": ["Apple Inc. 10-K FY2023 — Risk Factors"],
+  "chunks": [...],
+  "conversation_id": 42
 }
 ```
 
-Internally it does: embed the question → find closest chunks in DB → hand chunks to Claude → Claude writes a cited answer.
+Internally: Claude runs an agent loop — it calls `search_filings` (which uses
+HyDE + pgvector) one or more times until it has enough context, then calls
+`format_answer` to produce the cited answer. The conversation is saved to the DB
+so follow-up questions have history.
 
 ---
 
@@ -89,9 +97,10 @@ EDGAR website  →  edgar.py  →  chunk.py    →  embed.py  →  PostgreSQL
 (raw HTML)        (clean       (500-word       (vectors)    (chunks +
                    text)        pieces)                      embeddings)
 
-User question  →  embed.py  →  retrieve.py  →  generate.py  →  Answer
-               (vector)       (find closest    (Claude writes
-                               chunks)          with citations)
+User question  →  hyde.py  →  embed.py  →  retrieve.py  →  generate.py  →  Answer
+               (write a fake   (vector)     (find closest   (Claude agent
+                filing passage)              chunks)         loop with
+                                                             citations)
 ```
 
 ---
@@ -111,11 +120,13 @@ User question  →  embed.py  →  retrieve.py  →  generate.py  →  Answer
 
 ## Build phases (what's built when)
 
-| Phase | What works |
-|---|---|
-| **Phase 1** | Ingest one company, ask one question, get a cited answer |
-| **Phase 2** | The AI decides *when* to search (tool-calling) — smarter retrieval |
-| **Phase 3** | AI can also fetch stock prices and diff two filings year-over-year |
-| **Phase 4** | Auto-detects new filings; answers are scored automatically |
-
-Right now the project is scaffolded (files exist, stubs written) but Phase 1 is not yet implemented.
+| Phase | What works | Status |
+|---|---|---|
+| **Phase 1** | Ingest one company, ask one question, get a cited answer | ✅ Done |
+| **Phase 2** | The AI decides *when* to search (tool-calling) — smarter retrieval | ✅ Done |
+| **Phase 3** | Token efficiency: prompt caching, chunk dedup, HyDE on Haiku, usage logging | ✅ Done |
+| **Phase 4** | Conversational memory: follow-up questions work; conversations saved to DB | ✅ Done |
+| **Phase 5** | Async ingest worker; coverage tools so the AI knows what's indexed | Planned |
+| **Phase 6** | AI can fetch stock prices and diff two filings year-over-year | Planned |
+| **Phase 7** | New data sources: earnings calls, press releases | Planned |
+| **Phase 8** | Auto-detects new filings; answers are scored automatically | Planned |

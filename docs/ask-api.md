@@ -11,22 +11,17 @@ POST /ask
 ```json
 {
   "question": "What are Apple's biggest risks?",
-  "filters": {
-    "ticker": "AAPL",
-    "form_type": "10-K",
-    "fiscal_year": 2023
-  },
-  "k": 6
+  "conversation_id": 42
 }
 ```
 
 | Field | Required | Description |
 |---|---|---|
 | `question` | Yes | The investor's plain-English question (3–2000 chars) |
-| `filters.ticker` | No | Limit results to a specific company ticker |
-| `filters.form_type` | No | Limit to a filing type (`10-K`, `10-Q`, etc.) |
-| `filters.fiscal_year` | No | Limit to a specific fiscal year |
-| `k` | No | Number of source chunks to retrieve (1–20, default 6) |
+| `conversation_id` | No | ID of a prior conversation to continue. Omit to start a new one. |
+
+The agent extracts company, form type, and year directly from the question — no
+need to pass filters manually.
 
 ---
 
@@ -37,9 +32,14 @@ POST /ask
   "answer": "string",
   "sources": ["string"],
   "chunks": [ChunkResult],
+  "conversation_id": 42,
   "hypothetical_document": "string"
 }
 ```
+
+| Field | Description |
+|---|---|
+| `conversation_id` | ID for this conversation. Pass on the next call to continue the conversation. |
 
 ### `answer`
 A plain-English answer to the question, grounded entirely in the filing excerpts.
@@ -168,6 +168,8 @@ then embedded to find real matches.
     }
   ],
 
-  "hypothetical_document": "Apple Inc. faces risks including competition from Samsung and Google, supply chain concentration in Asia, and regulatory scrutiny in the EU ..."
+  "conversation_id": 17,
+
+  "hypothetical_document": null
 }
 ```

@@ -27,7 +27,7 @@ differentiators over the option that just makes a nicer chatbot.
 - **API:** FastAPI (run: `uvicorn app.main:app --reload`)
 - **DB:** PostgreSQL + pgvector (external; set `DATABASE_URL` in `.env`)
 - **ORM:** SQLAlchemy 2.x, `psycopg` (v3) driver
-- **Generation:** Anthropic Claude (model in `settings.chat_model`)
+- **Generation:** Anthropic Claude (`settings.chat_model` for main answers, `settings.hyde_model` for HyDE)
 - **Embeddings:** OpenAI `text-embedding-3-small` (1536 dims) — embeddings ONLY
 - **Data source:** SEC EDGAR free JSON/HTML endpoints (no key; needs User-Agent)
 - **Config:** pydantic-settings reading `.env` (see `app/config.py`, `.env.example`)
@@ -41,30 +41,37 @@ Claude purely for generation. Don't mix these up.
 app/
   config.py        settings from .env
   db.py            engine/session, pgvector setup
-  models.py        SQLAlchemy models (filings, chunks, companies)
+  models.py        SQLAlchemy models (companies, filings, chunks, conversations, messages)
   schemas.py       Pydantic request/response
   main.py          FastAPI app + /health
   ingest/          edgar.py (SEC client), chunk.py (splitting), embed.py (OpenAI)
-  rag/             retrieve.py (vector search), generate.py (Claude answers)
-  tools/           registry.py (tool-calling defs + dispatch)   [Phase 2+]
-  market/          prices.py (market data client)               [Phase 3]
+  rag/             retrieve.py (vector search), generate.py (Claude agent loop),
+                   hyde.py (HyDE query expansion with Haiku)
+  tools/           registry.py (tool-calling defs + dispatch)
+  market/          prices.py (market data client stub)          [Phase 6]
   routers/         documents.py (ingest endpoints), ask.py (query endpoint)
-evals/             test_set.example.json + scoring (Phase 4)
+evals/             test_set.example.json + scoring              [Phase 8]
 scripts/           init_db.sql (enables pgvector)
 ```
 
-## Build order (do these in sequence — see SPEC.md for detail)
+## Build order (see `spec/` for detail — one file per phase)
 
-- **Phase 1 — Plain RAG.** Ingest a company's filings -> chunk -> embed -> store.
-  `POST /ask` does a fixed embed -> retrieve -> prompt -> answer with citations.
-  Goal: one company, end to end, working and demoable.
-- **Phase 2 — Tool-calling.** Replace the hardcoded retrieval in `/ask` with a
-  `search_filings` tool the model invokes. Build the real loop: send tools ->
-  model requests one -> validate args -> run handler -> return result -> repeat.
-- **Phase 3 — Actions + structured data.** Add `compare_filings` (year-over-year
-  diff) and `get_stock_price`. This is where filing text meets real numbers.
-- **Phase 4 — Monitoring + evals.** Scheduled ingestion that detects new filings
-  and reports changes; an eval harness scoring answers against `evals/`.
+- **Phase 1 — Plain RAG** ✅ Ingest filings → chunk → embed → store. `POST /ask`
+  does embed → retrieve → prompt → answer with citations.
+- **Phase 2 — Tool-calling** ✅ Replaced hardcoded retrieval with a `search_filings`
+  tool the model invokes in a loop. Claude decides when and what to search.
+- **Phase 3 — Token efficiency** ✅ Prompt caching (system prompt + tool schemas +
+  last message), chunk dedup across multi-search turns, HyDE routed to Haiku,
+  per-request token usage logged.
+- **Phase 4 — Conversational guidance** ✅ Simplified `/ask` API (question +
+  conversation_id only), server-side conversation persistence, token telemetry per
+  message stored in DB.
+- **Phase 5 — Worker split** Async ingest worker, ingest job tracking, coverage
+  tools (list_companies, list_filings) in the agent.
+- **Phase 6 — Actions + structured data.** Add `compare_filings` and
+  `get_stock_price`. Filing text meets real numbers.
+- **Phase 7 — New data sources.** Earnings call transcripts, press releases.
+- **Phase 8 — Monitoring + evals.** Scheduled ingestion, eval harness.
 
 Do not jump ahead. Each phase should run before the next begins.
 

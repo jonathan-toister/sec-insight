@@ -1,6 +1,6 @@
-# How SEC Insight Works — Phase 2: The Agent Loop
+# How SEC Insight Works — Phases 2–4: The Agent Loop
 
-This document explains how the `/ask` endpoint works after Phase 2. No finance or ML background needed.
+This document explains how the `/ask` endpoint works after Phases 2–4. No finance or ML background needed.
 
 ---
 
@@ -37,6 +37,17 @@ Your question
     → Loops: search → read results → search again if needed
     → Claude writes the answer when it has enough
 ```
+
+**Phase 3** made the loop cheaper: the system prompt and tool schemas are cached
+with Anthropic's prompt caching API (charged at ~10% after the first call), chunks
+are deduplicated across multiple searches so the same text is never resent, and
+HyDE hypothetical-document generation runs on the fast/cheap Haiku model. Token
+usage is logged per request.
+
+**Phase 4** added persistent conversations and simplified the request: you now
+just send a `question` (and optionally a `conversation_id` to continue a prior
+conversation). Prior turns are loaded from Postgres and fed as history into the
+agent loop so follow-up questions have context.
 
 ---
 
@@ -241,7 +252,8 @@ app/
     ├── TOOL_SCHEMAS        The search_filings JSON schema Claude sees
     ├── dispatch()          Routes a tool call to the right handler
     ├── _validate_search_args()  Arg validation before any DB call
-    └── handle_search_filings()  Embeds query → vector search → return chunks
+    ├── handle_search_filings()  Embeds query (via HyDE) → vector search → return chunks
+    └── _format_result_chunks()  Deduplicates chunks seen in prior searches
 ```
 
 ---
@@ -252,10 +264,17 @@ app/
 You          /ask router      run_agent()        Claude       PostgreSQL
  │                │                │                │              │
  │  POST /ask     │                │                │              │
+ │  {question,    │                │                │              │
+ │   conv_id?}    │                │                │              │
  │─────────────>  │                │                │              │
+ │                │ load history   │                │              │
+ │                │─────────────────────────────────────────────> │
+ │                │ prior messages │                │              │
+ │                │<─────────────────────────────────────────────-│
  │                │  run_agent()   │                │              │
  │                │───────────────>│                │              │
  │                │                │  question +    │              │
+ │                │                │  history +     │              │
  │                │                │  tool schemas  │              │
  │                │                │───────────────>│              │
  │                │                │                │              │
@@ -263,7 +282,7 @@ You          /ask router      run_agent()        Claude       PostgreSQL
  │                │                │  (ticker="KO") │              │
  │                │                │<───────────────│              │
  │                │                │                │              │
- │                │                │  embed query   │              │
+ │                │                │  HyDE + embed  │              │
  │                │                │─────────────────────────────> │
  │                │                │  top-k chunks  │              │
  │                │                │<─────────────────────────────-│
@@ -277,9 +296,14 @@ You          /ask router      run_agent()        Claude       PostgreSQL
  │                │                │  (research)    │              │
  │                │                │<───────────────│              │
  │                │                │                │              │
+ │                │ save messages  │                │              │
+ │                │ + token usage  │                │              │
+ │                │─────────────────────────────────────────────> │
  │                │  AskResponse   │                │              │
  │                │<───────────────│                │              │
  │  200 OK        │                │                │              │
+ │  {answer,      │                │                │              │
+ │   conv_id}     │                │                │              │
  │<───────────────│                │                │              │
 ```
 

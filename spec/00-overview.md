@@ -10,8 +10,8 @@ Build phase by phase; don't skip ahead.
 |---|---|---|
 | 1 — Plain RAG | [phase-1-plain-rag.md](phase-1-plain-rag.md) | ✅ Done |
 | 2 — Tool-calling | [phase-2-tool-calling.md](phase-2-tool-calling.md) | ✅ Done |
-| 3 — Token efficiency baseline | [phase-3-token-efficiency.md](phase-3-token-efficiency.md) | Planned |
-| 4 — Conversational guidance | [phase-4-conversational-guidance.md](phase-4-conversational-guidance.md) | Planned |
+| 3 — Token efficiency baseline | [phase-3-token-efficiency.md](phase-3-token-efficiency.md) | ✅ Done |
+| 4 — Conversational guidance | [phase-4-conversational-guidance.md](phase-4-conversational-guidance.md) | ✅ Done |
 | 5 — Worker split + ingest tools + persistence | [phase-5-worker-split.md](phase-5-worker-split.md) | Planned |
 | 6 — Actions + structured data | [phase-6-actions-structured-data.md](phase-6-actions-structured-data.md) | Planned |
 | 7 — New data sources | [phase-7-data-sources.md](phase-7-data-sources.md) | Planned |
@@ -36,18 +36,22 @@ tool can't have: live ingestion, structured-data joins, actions, monitoring.
 
 ## Data model
 
-Three tables (pgvector for the embedding column):
+Five tables (pgvector for the embedding column):
 
-- **companies** — `id, ticker, cik, name, sector`. Maps a ticker to its EDGAR CIK.
-- **filings** — `id, cik, company, ticker, form_type ('10-K'|'10-Q'),
-  fiscal_year, url, filed_at`. One row per document. Unique on
-  `(cik, form_type, fiscal_year)` so re-ingesting is idempotent.
+- **companies** — `id, ticker, cik, name, sic, sic_description,
+  state_of_incorporation, exchanges, entity_type`. Maps a ticker to its EDGAR CIK.
+- **filings** — `id, company_id FK, form_type ('10-K'|'10-Q'), fiscal_year, url,
+  filed_at`. One row per document. Unique on `url` so re-ingesting is idempotent.
 - **chunks** — `id, filing_id FK, chunk_index, section, text, embedding VECTOR(1536)`.
   HNSW index on `embedding` with `vector_cosine_ops`.
+- **conversations** — `id, title (first question ≤200 chars), created_at,
+  updated_at`. One row per chat session.
+- **messages** — `id, conversation_id FK, seq, role ('user'|'assistant'), content,
+  created_at, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+  model, latency_ms`. One row per turn; assistant messages carry full token telemetry.
 
-Later phases extend this: phase 3 adds token-usage logging, phase 5 adds ingest
-jobs and conversations/messages tables, phase 7 adds `source_type` on
-filings/chunks plus a structured-financials table.
+Phase 5 adds ingest jobs; phase 7 adds `source_type` on filings/chunks plus a
+structured-financials table.
 
 ## Data source: SEC EDGAR
 

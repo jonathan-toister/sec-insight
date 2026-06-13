@@ -8,8 +8,8 @@ phase index:
 
 - [Phase 1 — Plain RAG](spec/phase-1-plain-rag.md) ✅
 - [Phase 2 — Tool-calling](spec/phase-2-tool-calling.md) ✅
-- [Phase 3 — Token efficiency baseline](spec/phase-3-token-efficiency.md)
-- [Phase 4 — Conversational guidance](spec/phase-4-conversational-guidance.md)
+- [Phase 3 — Token efficiency baseline](spec/phase-3-token-efficiency.md) ✅
+- [Phase 4 — Conversational guidance](spec/phase-4-conversational-guidance.md) ✅
 - [Phase 5 — Worker split + ingest tools + persistence](spec/phase-5-worker-split.md)
 - [Phase 6 — Actions + structured data](spec/phase-6-actions-structured-data.md)
 - [Phase 7 — New data sources](spec/phase-7-data-sources.md)

@@ -1,7 +1,7 @@
 # Phase 3 — Token efficiency baseline
 
-**Status: planned.** New phase. Small, phase-independent optimizations that
-should land before the conversation features (phases 4–5) multiply token usage.
+**Status: implemented.** Small, phase-independent optimizations that
+landed before the conversation features (phases 4–5) multiply token usage.
 No new capability — same behavior, lower cost, plus the measurement needed to
 prove it.
 

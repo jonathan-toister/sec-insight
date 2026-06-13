@@ -1,7 +1,8 @@
 # Getting started with Claude Code
 
-This project is scaffolded but the implementation is intentionally left as stubs
-so you build it with Claude Code. Here's how to pick it up.
+Phases 1–4 are implemented (plain RAG, tool-calling agent loop, token efficiency,
+persistent conversations). The next phase to build is Phase 5. Here's how to
+orient yourself and continue.
 
 ## 1. Open it
 
@@ -13,7 +14,7 @@ read `CLAUDE.md` automatically — that's your project's standing context.
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+pip3 install -r requirements.txt
 cp .env.example .env
 ```
 
@@ -29,29 +30,23 @@ uvicorn app.main:app --reload
 # open http://localhost:8000/health  -> {"status":"ok"}
 ```
 
-## 3. Build with Claude Code, phase by phase
+## 3. Continue with Claude Code from Phase 5
 
 The golden rule: **one phase at a time**, and run it before moving on. `SPEC.md`
-has the detailed steps; `CLAUDE.md` has the build order. Good opening prompts:
+has the detailed steps; `CLAUDE.md` has the build order. Phases 1–4 are done.
 
-> "Read CLAUDE.md and SPEC.md. We're doing Phase 1 only. Start by implementing
-> `app/db.py`, `app/models.py`, and `scripts/init_db.sql` for the filings and
-> chunks tables with a pgvector embedding column. Show me the plan before coding."
+Good opening prompt for Phase 5:
 
-Then proceed step by step:
+> "Read CLAUDE.md and spec/phase-5-worker-split.md. Phases 1–4 are fully
+> implemented. Start Phase 5: the async ingest worker, ingest job tracking table,
+> and coverage tools (list_companies, list_filings) in tools/registry.py.
+> Show me the plan before coding."
 
-> "Now implement `app/ingest/edgar.py`: ticker→CIK, list 10-K/10-Q filings for a
-> company, and download + clean the primary document to text. Use the SEC
-> endpoints in SPEC.md and send the User-Agent from settings."
-
-> "Implement chunking and embeddings (`chunk.py`, `embed.py`), then the ingest
-> endpoint in `routers/documents.py`. Let's ingest AAPL and verify rows land in
-> the DB."
-
-> "Implement retrieval and generation, then `POST /ask`. Test it with a real
-> question about Apple's risk factors and confirm the answer cites the filing."
-
-When Phase 1 runs end to end, move to Phase 2 (tool-calling), and so on.
+The existing implementation is a useful reference:
+- `app/rag/generate.py` — the agentic loop with prompt caching
+- `app/tools/registry.py` — how tools are defined and dispatched
+- `app/routers/ask.py` — how conversation history is loaded and saved
+- `app/models.py` — the current DB schema
 
 ## 4. Tips for working with Claude Code here
 
@@ -62,9 +57,9 @@ When Phase 1 runs end to end, move to Phase 2 (tool-calling), and so on.
 - Commit after each working step (`git init` first) so you can roll back.
 - If it tries to jump ahead a phase, redirect it — the phases build on each other.
 
-## 5. First milestone to aim for
+## 5. Next milestone
 
-Ingest one company's latest 10-K and get a correct, cited answer to one real
-question. That's Phase 1 done and already something worth showing. Everything
-after that — tool-calling, diffs, prices, monitoring — is what makes it more than
-a doc-chat toy.
+Ingest one company (`POST /companies/AAPL/ingest`) and confirm `POST /ask` returns
+a cited answer. Then try a follow-up question using the returned `conversation_id`
+to verify conversational history works. That confirms Phases 1–4 are healthy in
+your environment before you start Phase 5.

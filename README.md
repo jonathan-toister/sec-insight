@@ -19,7 +19,7 @@ Python · FastAPI · PostgreSQL + pgvector · SQLAlchemy · Anthropic Claude
 ```bash
 # 1. Python env
 python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+pip3 install -r requirements.txt
 
 # 2. Config
 cp .env.example .env          # then fill in ANTHROPIC_API_KEY + OPENAI_API_KEY
@@ -32,23 +32,30 @@ uvicorn app.main:app --reload # http://localhost:8000/health  and  /docs
 You need two API keys: **Anthropic** (generation) and **OpenAI** (embeddings
 only). SEC EDGAR needs no key, just a descriptive `User-Agent`.
 
-## How it works (Phase 1)
+## How it works (Phases 1–4 implemented)
 
 1. **Ingest** — `POST /companies/{ticker}/ingest` pulls a company's recent
-   filings from EDGAR, splits them into chunks, embeds each chunk with OpenAI,
-   and stores text + vector in Postgres.
-2. **Ask** — `POST /ask` embeds your question, retrieves the most similar chunks
-   via pgvector, hands them to Claude as context, and returns an answer with the
-   filing it came from.
+   filings from EDGAR, splits them into chunks, embeds each chunk with OpenAI
+   (via HyDE for better retrieval alignment), and stores text + vector in Postgres.
+2. **Ask** — `POST /ask` runs an agentic loop: Claude calls `search_filings`
+   one or more times (with HyDE + pgvector retrieval), then calls `format_answer`
+   with a cited plain-English answer. Pass `conversation_id` to continue a prior
+   conversation; omit to start a new one.
+
+Conversations and per-message token telemetry are persisted to Postgres.
 
 ## Roadmap
 
 See `SPEC.md` for the full phased build plan. In short:
 
-- **Phase 1** — Plain RAG over one company's filings.
-- **Phase 2** — Tool-calling: the model decides when to retrieve.
-- **Phase 3** — Action tools: year-over-year diffs + live stock prices.
-- **Phase 4** — Monitoring for new filings + an eval harness.
+- **Phase 1** ✅ Plain RAG over one company's filings.
+- **Phase 2** ✅ Tool-calling: the model decides when to retrieve.
+- **Phase 3** ✅ Token efficiency: prompt caching, chunk dedup, HyDE on Haiku, usage logging.
+- **Phase 4** ✅ Conversational guidance: persistent conversations, simplified API, token telemetry.
+- **Phase 5** — Worker split + coverage tools + ingest job tracking.
+- **Phase 6** — Action tools: year-over-year diffs + live stock prices.
+- **Phase 7** — New data sources (earnings calls, press releases).
+- **Phase 8** — Monitoring for new filings + an eval harness.
 
 ## Project files
 
