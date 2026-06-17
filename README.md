@@ -18,15 +18,22 @@ Python · FastAPI · PostgreSQL + pgvector · SQLAlchemy · Anthropic Claude
 
 ```bash
 # 1. Python env
-python -m venv .venv && source .venv/bin/activate
-pip3 install -r requirements.txt
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
 
 # 2. Config
-cp .env.example .env          # then fill in ANTHROPIC_API_KEY + OPENAI_API_KEY
-                              # and set SEC_USER_AGENT to "Your Name your@email"
+cp .env.example .env   # fill in ANTHROPIC_API_KEY, OPENAI_API_KEY,
+                       # DATABASE_URL, REDIS_URL,
+                       # SEC_USER_AGENT ("Your Name your@email")
 
-# 3. Run the API
-uvicorn app.main:app --reload # http://localhost:8000/health  and  /docs
+# 3. Start Redis (needed for the background ingest worker)
+redis-server --daemonize yes   # or: docker run -d -p 6379:6379 redis
+
+# 4. Start the API
+uvicorn app.main:app --reload  # http://localhost:8000/health
+
+# 5. Start the ingest worker (separate terminal — same codebase, different process)
+arq app.worker.WorkerSettings
 ```
 
 You need two API keys: **Anthropic** (generation) and **OpenAI** (embeddings

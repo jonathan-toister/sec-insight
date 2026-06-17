@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     # --- Database ---
     database_url: str = "postgresql+psycopg://sec:sec@localhost:5432/sec"
 
+    # --- Redis (arq job queue) ---
+    redis_url: str = "redis://localhost:6379"
+
     # --- SEC EDGAR ---
     # SEC requires a descriptive User-Agent: "Name email" — see SPEC.md.
     sec_user_agent: str = "sec-insight you@example.com"

@@ -1,4 +1,4 @@
-# How SEC Insight Works — Phases 2–4: The Agent Loop
+# How SEC Insight Works — Phases 2–5: The Agent Loop + Ingest Worker
 
 This document explains how the `/ask` endpoint works after Phases 2–4. No finance or ML background needed.
 
@@ -322,3 +322,135 @@ It prevents cross-company contamination and forces Claude to be explicit. If the
 
 **What's the max 10 turns for?**
 A safety brake. Without it, a confused model could loop forever. In practice, 1–2 search calls are enough for any real question.
+
+---
+
+## Phase 5 — Worker Split + Ingest Tools
+
+### Why a separate worker process?
+
+Ingesting a 10-K takes minutes: fetch HTML from EDGAR → strip to text → split into ~500-word chunks → embed each chunk via OpenAI → write hundreds of rows to Postgres. Running that inline in a chat request would block the HTTP connection the whole time. Instead:
+
+- The **API process** (`uvicorn`) handles all user interaction, including triggering ingest.
+- The **worker process** (`arq`) executes ingest jobs in the background.
+- **Redis** is the handoff: the API writes a job, the worker reads and runs it.
+- **Postgres** is the source of truth for job status — it survives a Redis restart.
+
+Both processes run from the same codebase. `uvicorn app.main:app` starts the API; `arq app.worker.WorkerSettings` starts the worker.
+
+### The `POST /companies/{ticker}/ingest` endpoint is gone
+
+There is no manual ingest endpoint in Phase 5. The only entry point for ingestion is through `POST /ask`. The agent decides when to ingest based on what the user asks.
+
+### Four new agent tools
+
+| Tool | What it does |
+|---|---|
+| `list_companies` | Returns all tickers that have at least one filing indexed |
+| `list_filings(ticker?)` | Returns each filing's status: `ingested`, `ingesting`, or `failed` |
+| `ingest_filing(ticker, form_type, fiscal_year)` | Validates args, creates an `IngestJob` row, enqueues an arq job. Idempotent: returns immediately if already indexed or in-flight |
+| `check_ingest_status(job_id, wait?)` | Reads job state from Postgres. If `wait=true`, polls every 3 seconds until the job reaches `done` or `failed` (up to 10 min timeout) |
+
+### New `ingest_jobs` table
+
+Tracks every ingest attempt:
+
+```
+id              BigInteger PK
+ticker          Text
+form_type       Text
+fiscal_year     Integer (nullable)
+status          Text — "queued" | "running" | "done" | "failed"
+error_message   Text (nullable)
+job_id          Text (arq job id, unique)
+conversation_id BigInteger FK → conversations (nullable, SET NULL on delete)
+created_at      DateTime
+started_at      DateTime (nullable)
+completed_at    DateTime (nullable)
+```
+
+Unique constraint on `(ticker, form_type, fiscal_year)` so there is at most one job per filing identity.
+
+### How ingest flows through the system
+
+```
+POST /ask  "Ingest NVDA 2024 10-K and tell me their revenue"
+  │
+  ▼
+Agent turn 0
+  Claude calls: list_filings(ticker="NVDA")
+  → no NVDA row found
+  │
+  ▼
+Agent turn 1
+  Claude calls: ingest_filing("NVDA", "10-K", 2024)
+  → creates IngestJob row (status=queued)
+  → enqueues arq job "ingest_filing_task"
+  → returns job_id="ingest-NVDA-10-K-2024"
+  │
+  ├── [Worker picks up job]
+  │     mark status=running
+  │     get_cik("NVDA") → CIK
+  │     list_filings(CIK) → find FY2024 10-K URL
+  │     download_filing(url) → raw HTML → clean text
+  │     split_text() → ~700 chunks
+  │     embed_texts() → vectors
+  │     upsert Filing + Chunks → Postgres
+  │     mark status=done
+  │
+  ▼
+Agent turn 2
+  Claude calls: check_ingest_status(job_id, wait=true)
+  → polls Postgres every 3s until status=done
+  → "Ingest complete. The filing is ready to search."
+  │
+  ▼
+Agent turn 3
+  Claude calls: search_filings(query="revenue", ticker="NVDA", ...)
+  → finds relevant chunks
+  │
+  ▼
+Agent turn 4
+  Claude calls: format_answer(response_type="research", answer="NVDA revenue was $60.9B...")
+  → returns cited answer to user
+```
+
+### Agent wait policy
+
+The agent infers from the question whether to block and wait or just acknowledge:
+
+| Situation | Agent behaviour |
+|---|---|
+| "Ingest X and tell me Y" (single filing, dependent question) | `ingest_filing` → `check_ingest_status(wait=true)` → search → answer in one turn |
+| "Ingest these 10 filings" (bulk, no dependent question) | Enqueue all, acknowledge each, do not block |
+| Filing shows `status=ingesting` and user asks about it | Report "still being ingested", offer to wait or be re-asked — never returns empty/hallucinated answer |
+| Filing shows `status=failed` | Reports the error, offers to retry |
+
+### Where everything lives (Phase 5 additions)
+
+```
+app/
+├── worker.py               WorkerSettings + ingest_filing_task (arq worker entrypoint)
+├── ingest/
+│   └── pipeline.py         upsert_company() + ingest_one_filing() — shared ingest logic
+│                           (called by the worker; no FastAPI dependency)
+├── tools/registry.py       Now has 5 tools: search_filings + the 4 new ingest tools
+├── rag/generate.py         run_agent() now accepts conversation_id + arq_redis;
+│                           system prompt extended with ingest workflow rules
+├── routers/
+│   └── ask.py              Passes conversation_id + arq_redis into run_agent()
+└── models.py               + IngestJob model
+```
+
+### Key design decisions (Phase 5)
+
+**Why is Postgres the source of truth for job status, not Redis?**
+arq's Redis entries expire. If Redis restarts, job history is gone. By mirroring status into `ingest_jobs`, the agent can always answer "what happened to job X?" with a SQL query, even days later.
+
+**Why does the worker receive the `IngestJob.id` (Postgres PK), not the arq job id?**
+The Postgres PK is stable before enqueueing and survives retries. The worker loads the row by PK, updates it in-place, and the agent tracks status through the same row — no fragile string matching on arq-generated IDs.
+
+**Why is ingest idempotent at three layers?**
+1. `ingest_filing` tool checks for an existing `Filing` row before enqueueing.
+2. `IngestJob` has a unique constraint on `(ticker, form_type, fiscal_year)` — the DB rejects duplicates.
+3. `ingest_one_filing()` in the worker checks for an existing `Filing.url` before downloading. A crashed-and-restarted job won't double-write.

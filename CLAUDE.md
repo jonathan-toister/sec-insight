@@ -25,6 +25,8 @@ differentiators over the option that just makes a nicer chatbot.
 
 - **Language:** Python 3.11+
 - **API:** FastAPI (run: `uvicorn app.main:app --reload`)
+- **Worker:** arq (run: `arq app.worker.WorkerSettings`) — separate process, same codebase
+- **Queue:** Redis (job handoff between API and worker; set `REDIS_URL` in `.env`)
 - **DB:** PostgreSQL + pgvector (external; set `DATABASE_URL` in `.env`)
 - **ORM:** SQLAlchemy 2.x, `psycopg` (v3) driver
 - **Generation:** Anthropic Claude (`settings.chat_model` for main answers, `settings.hyde_model` for HyDE)
@@ -39,17 +41,21 @@ Claude purely for generation. Don't mix these up.
 
 ```
 app/
-  config.py        settings from .env
-  db.py            engine/session, pgvector setup
-  models.py        SQLAlchemy models (companies, filings, chunks, conversations, messages)
+  config.py        settings from .env (incl. REDIS_URL)
+  db.py            engine/session, pgvector setup, create_redis_pool()
+  models.py        SQLAlchemy models (companies, filings, chunks, conversations,
+                   messages, ingest_jobs)
   schemas.py       Pydantic request/response
-  main.py          FastAPI app + /health
-  ingest/          edgar.py (SEC client), chunk.py (splitting), embed.py (OpenAI)
+  main.py          FastAPI app + /health; lifespan creates arq Redis pool
+  worker.py        arq WorkerSettings + ingest_filing_task (worker entrypoint)
+  ingest/          edgar.py (SEC client), chunk.py (splitting), embed.py (OpenAI),
+                   pipeline.py (upsert_company + ingest_one_filing — shared by worker)
   rag/             retrieve.py (vector search), generate.py (Claude agent loop),
                    hyde.py (HyDE query expansion with Haiku)
-  tools/           registry.py (tool-calling defs + dispatch)
+  tools/           registry.py (5 tool schemas + dispatch: search_filings,
+                   list_companies, list_filings, ingest_filing, check_ingest_status)
   market/          prices.py (market data client stub)          [Phase 6]
-  routers/         documents.py (ingest endpoints), ask.py (query endpoint)
+  routers/         documents.py (GET /filings only), ask.py (POST /ask)
 evals/             test_set.example.json + scoring              [Phase 8]
 scripts/           init_db.sql (enables pgvector)
 ```
@@ -66,8 +72,11 @@ scripts/           init_db.sql (enables pgvector)
 - **Phase 4 — Conversational guidance** ✅ Simplified `/ask` API (question +
   conversation_id only), server-side conversation persistence, token telemetry per
   message stored in DB.
-- **Phase 5 — Worker split** Async ingest worker, ingest job tracking, coverage
-  tools (list_companies, list_filings) in the agent.
+- **Phase 5 — Worker split** ✅ Ingest moves to an arq background worker. REST
+  ingest endpoint removed — all ingest goes through the agent (`ingest_filing`,
+  `check_ingest_status`, `list_companies`, `list_filings` tools). `ingest_jobs`
+  table tracks status. Two processes: `uvicorn app.main:app` (API) and
+  `arq app.worker.WorkerSettings` (worker).
 - **Phase 6 — Actions + structured data.** Add `compare_filings` and
   `get_stock_price`. Filing text meets real numbers.
 - **Phase 7 — New data sources.** Earnings call transcripts, press releases.

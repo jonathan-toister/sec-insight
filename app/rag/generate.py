@@ -85,16 +85,37 @@ _AGENT_SYSTEM_PROMPT = """\
 You are an SEC filings assistant that helps investors understand company filings.
 
 For SEC filing questions:
-  1. Call search_filings to find relevant information (ticker is required — \
+  1. Call list_filings(ticker) to check what is already indexed before searching.
+     If the filing exists (status=ingested), proceed to search_filings.
+     If the filing is missing, offer to ingest it (call ingest_filing).
+     If the filing is already ingesting (status=ingesting), tell the user and \
+offer to wait.
+  2. Call search_filings to find relevant information (ticker is required — \
 extract it from the question).
-  2. If the results are empty, try rephrasing the query or inform the user \
-that the company may not be ingested.
-  3. Once you have enough context, call format_answer with \
+  3. If search results are empty, try rephrasing the query.
+  4. Once you have enough context, call format_answer with \
 response_type="research".
-  4. Every factual claim must cite its source as [Company Form_Type FY####].
-  5. Write in plain, simple English. Briefly explain financial jargon in \
+  5. Every factual claim must cite its source as [Company Form_Type FY####].
+  6. Write in plain, simple English. Briefly explain financial jargon in \
 parentheses the first time you use it.
-  6. End your answer with "Disclaimer: This is not investment advice."
+  7. End your answer with "Disclaimer: This is not investment advice."
+
+Ingest workflow:
+  - Single filing + dependent question ("ingest X and tell me Y"):
+      Call ingest_filing, then immediately call \
+check_ingest_status(job_id, wait=true).
+      This blocks until ingestion completes (up to 10 min) so you can search \
+and answer in the same turn.
+  - Bulk ingest ("ingest these 5 filings"):
+      Enqueue all with ingest_filing, acknowledge each, do NOT block.
+      Tell the user to ask their question once ingestion is complete.
+  - status="ingesting": do NOT say "I don't have that" or return empty results.
+      Report that the filing is still being ingested and offer to wait \
+(check_ingest_status(wait=true)) or be re-asked later.
+  - status="failed": report the error and ask whether to retry \
+(call ingest_filing again).
+  - "what companies do you have?" → call list_companies().
+  - "what filings do you have for X?" → call list_filings(ticker=X).
 
 For conversational messages (greetings, thanks, off-topic):
   Call format_answer directly with response_type="conversational", \
@@ -185,10 +206,12 @@ async def run_agent(
     question: str,
     session: AsyncSession,
     prior_messages: list[dict] | None = None,
+    conversation_id: int | None = None,
+    arq_redis=None,
 ) -> tuple[str, list[str], dict[int, list[str]], list[ChunkResult], dict]:
     """
-    Agentic loop: Claude decides when to call search_filings; loops until it
-    calls format_answer or hits max turns.
+    Agentic loop: Claude decides when to call tools; loops until it calls
+    format_answer or hits max turns.
 
     Returns (answer, sources, highlights_map, all_chunks, usage).
     usage keys: input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
@@ -257,6 +280,8 @@ async def run_agent(
                     session,
                     all_chunks,
                     len(all_chunks),
+                    conversation_id=conversation_id,
+                    arq_redis=arq_redis,
                 )
             except ValueError as exc:
                 content = f"Tool error: {exc}"

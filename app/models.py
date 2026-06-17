@@ -101,3 +101,27 @@ class Message(Base):
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     conversation: Mapped["Conversation"] = relationship(back_populates="messages")
+
+
+class IngestJob(Base):
+    __tablename__ = "ingest_jobs"
+    __table_args__ = (UniqueConstraint("ticker", "form_type", "fiscal_year"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    ticker: Mapped[str] = mapped_column(Text, nullable=False)
+    form_type: Mapped[str] = mapped_column(Text, nullable=False)
+    fiscal_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # status: queued | running | done | failed
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="queued")
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    job_id: Mapped[str | None] = mapped_column(Text, nullable=True, unique=True)
+    conversation_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("conversations.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

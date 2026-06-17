@@ -1,5 +1,5 @@
 """Query endpoint — POST /ask."""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -14,6 +14,7 @@ router = APIRouter(prefix="/ask", tags=["ask"])
 
 @router.post("", response_model=AskResponse)
 async def ask(
+    http_request: Request,
     request: AskRequest,
     session: AsyncSession = Depends(get_session),
 ) -> AskResponse:
@@ -51,8 +52,14 @@ async def ask(
         content=request.question,
     ))
 
+    arq_redis = getattr(http_request.app.state, "arq_redis", None)
+
     answer, sources, highlights_map, chunks, usage = await run_agent(
-        request.question, session, prior_messages
+        request.question,
+        session,
+        prior_messages,
+        conversation_id=conversation.id,
+        arq_redis=arq_redis,
     )
 
     session.add(Message(

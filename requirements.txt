@@ -21,5 +21,9 @@ httpx
 beautifulsoup4
 lxml
 
+# --- Async job queue ---
+arq
+redis[asyncio]
+
 # --- Dev / eval ---
 pytest

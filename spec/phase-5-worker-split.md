@@ -26,15 +26,23 @@ benefit at none of the cost.
    with error detail. The worker is the only process that touches EDGAR.
 3. **Agent tools** in `tools/registry.py` — all ingest operations go through
    the agent, never via a direct REST endpoint:
-   - `list_filings(ticker?)` — query Postgres for what's already ingested.
-     Returns ticker, form type, fiscal year, ingested_at. The agent uses this
-     to answer "what do you have?" and to detect gaps before searching.
+   - `list_filings(ticker?)` — query Postgres for what's already ingested **and
+     what is currently in-flight**. Returns ticker, form type, fiscal year,
+     ingested_at, and a status (`ingested` / `ingesting` / `failed`) drawn from
+     `ingest_jobs`. The agent uses this to answer "what do you have?", to detect
+     gaps before searching, and to recognize a filing that is mid-ingest rather
+     than missing.
    - `list_companies()` — return all companies for which we have any filings.
    - `ingest_filing(ticker, form_type, fiscal_year)` — validate, enqueue an
      arq job, return job id. Triggered when the agent detects a gap or the user
      explicitly requests it ("please ingest NVDA's 2023 10-K").
-   - `check_ingest_status(job_id)` — read job state from Redis/Postgres so the
-     agent can report progress across turns.
+   - `check_ingest_status(job_id, wait?)` — read job state from Redis/Postgres
+     so the agent can report progress across turns. Supports an optional
+     server-side **blocking wait**: when `wait` is set, the tool polls
+     internally up to a timeout and returns once the job reaches a terminal
+     state (done/failed). This lets the agent answer within the same `/ask`
+     turn without spending a tool-call round-trip per poll. Without `wait` it
+     returns the current state immediately.
    - Link each ingest job to its `conversation_id` (persisted from phase 4) so
      a later turn can answer the original question once ingestion completes.
 4. **Deployment:** `api` and `worker` as separate processes — same codebase,
@@ -117,17 +125,73 @@ All user interaction — including triggering ingest — goes through `POST /ask
 - **Rate-limiting lives in the worker.** EDGAR's ~10 req/sec limit is enforced
   there, not in the API, so it never blocks a chat response.
 
+## Agent wait-policy (no-UI consideration)
+
+The async worker is required because ingesting a 10-K takes minutes — that
+latency is inherent to the work (fetch → chunk → embed thousands of chunks →
+upsert), not a product of the architecture. Making ingest synchronous wouldn't
+make it faster; it would just hang an HTTP request.
+
+But there is currently **no UI** — the only client is `POST /ask` and a
+server-side agent loop. So "ack now, answer on a later turn" would force the
+*caller* to make a second `/ask` call to get the answer, which is exactly the
+friction we want to avoid. Because the agent's tool-calling loop runs
+server-side within a single request, the agent can instead enqueue the job and
+block on `check_ingest_status(wait=…)` until it completes, then search and
+answer — all in one response, no second call needed.
+
+**Dependent-question intent.** The discriminator is whether the triggering
+message contains a question that *depends on* the doc being ingested. The agent
+infers this from the message itself:
+
+- **Dependent question present, single filing** ("ingest NVDA's 2023 10-K and
+  tell me their R&D spend") → enqueue, block-and-wait on
+  `check_ingest_status(wait)`, then answer in the same turn.
+- **Dependent question present, but the wait is non-trivial** (bulk, or the
+  agent expects minutes) → don't silently block. Offer the choice: "this'll
+  take ~2 min — want me to wait and answer now, or ingest in the background so
+  you're not blocked?" Block or ack based on the reply.
+- **No dependent question** ("ingest NVDA's 2023 10-K") → just ingest. There is
+  nothing to wait for, so do **not** ask whether they have a question; confirm
+  when done (or ack and let them ask whenever).
+- **Bulk / non-blocking ("ingest these 20 filings")** → enqueue all,
+  acknowledge, and let the user re-check later. Do not block the turn.
+
+**Querying a filing that is still ingesting.** If a question targets a filing
+that has an in-flight job (a `search_filings` miss + an `ingesting` row from
+`list_filings`), the agent must not answer "I don't have that" or hallucinate.
+It responds conversationally that the filing is still being ingested (with
+rough elapsed time if available) and offers to wait and answer now
+(`check_ingest_status(wait)`) or to be re-asked once it's ready. The
+`conversation_id` link lets it tie the in-flight job back to the user.
+
+Caveats to revisit (not solved now):
+
+- Blocking a request for minutes can trip HTTP/proxy timeouts. Acceptable for a
+  backend/dev setup; revisit when a real client or streaming surface exists.
+- The blocking wait needs a sane internal timeout so a stuck job degrades to a
+  "still running, check back" response rather than hanging indefinitely.
+
+This is a behavior/prompt decision plus the optional `wait` flag on
+`check_ingest_status` — no new component, table, or endpoint.
+
 ## Definition of done
 
 1. **Coverage tools work.** Asking "what companies do you have?" or "what NVDA
    filings do you have?" triggers `list_companies` / `list_filings` and returns
    accurate results from Postgres.
-2. **Explicit user-requested ingest works.** "Please ingest Apple's 2023 10-K"
-   → agent calls `ingest_filing` → job runs in the worker → agent confirms
-   completion in a follow-up turn.
+2. **Explicit user-requested ingest works.** "Ingest Apple's 2023 10-K and tell
+   me X" → agent calls `ingest_filing` → blocks on `check_ingest_status(wait)`
+   → job runs in the worker → agent answers X with citations **in the same
+   turn**. A bulk ingest request instead acks without blocking.
 3. **Agent-detected gap ingest works.** Ask about a missing filing → agent
    calls `list_filings`, detects the gap, offers to ingest → user says yes →
    agent calls `ingest_filing` → a later turn calls `check_ingest_status`,
    confirms completion, and answers the original question with citations.
-4. Starting `api` and `worker` as separate processes brings up all components
+4. **Mid-ingest query is handled gracefully.** Asking about a filing whose
+   ingest job is still running returns a conversational "still being ingested,
+   not available yet" response (via `list_filings` surfacing the `ingesting`
+   status) — never an empty/hallucinated answer — and offers to wait or be
+   re-asked.
+5. Starting `api` and `worker` as separate processes brings up all components
    without error.

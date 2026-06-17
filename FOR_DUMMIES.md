@@ -35,32 +35,10 @@ These are the raw documents this system reads.
 
 ## The APIs, plain English
 
-### `POST /companies/{ticker}/ingest`
-> *"Go download and index this company's filings."*
-
-You call this once per company before you can ask questions. It:
-1. Looks up the ticker (e.g. `AAPL`) to get Apple's SEC ID (CIK).
-2. Fetches Apple's recent 10-K and 10-Q documents from EDGAR.
-3. Strips the raw HTML to clean text.
-4. Splits the text into chunks (~500 words each).
-5. Converts each chunk to a vector (via OpenAI embeddings).
-6. Saves everything to the PostgreSQL database.
-
-After this runs, the database has hundreds of rows representing Apple's filings, ready to be searched.
-
-`{ticker}` in the URL is just replaced with the actual symbol, e.g. `/companies/AAPL/ingest`.
-
----
-
-### `GET /filings`
-> *"What have you already indexed?"*
-
-Lists the companies and filing documents already in the database. Useful to check "did the ingest work?" before asking questions.
-
----
+There is now only **one endpoint you interact with**: `POST /ask`. Everything — asking questions, ingesting new filings, and checking what's available — goes through the agent.
 
 ### `POST /ask`
-> *"Answer my question about SEC filings."*
+> *"Talk to the agent. It figures out what to do."*
 
 You send:
 ```json
@@ -83,25 +61,57 @@ You get back:
 }
 ```
 
-Internally: Claude runs an agent loop — it calls `search_filings` (which uses
-HyDE + pgvector) one or more times until it has enough context, then calls
-`format_answer` to produce the cited answer. The conversation is saved to the DB
-so follow-up questions have history.
+The agent handles three kinds of requests:
+
+**1. Questions about filings you already have**
+Claude searches indexed chunks and returns a cited answer. Same as before.
+
+**2. Requests to ingest a filing** — e.g. *"Ingest NVDA's 2024 10-K and tell me their revenue"*
+The agent queues a background job, waits for the worker to finish fetching and indexing the filing, then searches it and answers — all in one response. You don't have to call anything twice.
+
+**3. Coverage questions** — e.g. *"What companies do you have?"* or *"What NVDA filings are indexed?"*
+The agent looks it up in the database and tells you exactly what's available and what's in progress.
+
+---
+
+### `GET /filings`
+> *"What have you already indexed?"*
+
+Still available as a plain diagnostic endpoint. Lists every filing in the database with its ticker, form type, and fiscal year.
+
+---
+
+### The ingest endpoint is gone
+
+There is no longer a `POST /companies/{ticker}/ingest` endpoint. Just ask the agent: *"Please ingest AAPL's 2024 10-K"* and it will handle it.
+
+**Why?** It keeps everything auditable — every ingest request is a message in a conversation, and the agent can explain what it did and why.
 
 ---
 
 ## The data pipeline (how a filing becomes an answer)
 
+**Ingest path** (runs in the background worker):
 ```
 EDGAR website  →  edgar.py  →  chunk.py    →  embed.py  →  PostgreSQL
 (raw HTML)        (clean       (500-word       (vectors)    (chunks +
                    text)        pieces)                      embeddings)
+```
 
+**Ask path** (runs in the API):
+```
 User question  →  hyde.py  →  embed.py  →  retrieve.py  →  generate.py  →  Answer
                (write a fake   (vector)     (find closest   (Claude agent
                 filing passage)              chunks)         loop with
                                                              citations)
 ```
+
+**How they connect** — Redis is the bridge:
+```
+POST /ask  ──►  API process  ──► enqueue job ──►  Redis  ──►  Worker process
+                (chat, tools)                               (fetch, chunk, embed, store)
+```
+Both processes share the same Postgres database. The worker writes to the same tables the agent reads from.
 
 ---
 
@@ -126,7 +136,7 @@ User question  →  hyde.py  →  embed.py  →  retrieve.py  →  generate.py  
 | **Phase 2** | The AI decides *when* to search (tool-calling) — smarter retrieval | ✅ Done |
 | **Phase 3** | Token efficiency: prompt caching, chunk dedup, HyDE on Haiku, usage logging | ✅ Done |
 | **Phase 4** | Conversational memory: follow-up questions work; conversations saved to DB | ✅ Done |
-| **Phase 5** | Async ingest worker; coverage tools so the AI knows what's indexed | Planned |
+| **Phase 5** | Background ingest worker; ingest via the agent; coverage tools (`list_companies`, `list_filings`) | ✅ Done |
 | **Phase 6** | AI can fetch stock prices and diff two filings year-over-year | Planned |
 | **Phase 7** | New data sources: earnings calls, press releases | Planned |
 | **Phase 8** | Auto-detects new filings; answers are scored automatically | Planned |
