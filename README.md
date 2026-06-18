@@ -16,40 +16,78 @@ Python · FastAPI · PostgreSQL + pgvector · SQLAlchemy · Anthropic Claude
 
 ## Quick start
 
+### 1. Setup
+
 ```bash
-# 1. Python env
+# Clone and create a Python virtual environment
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# 2. Config
-cp .env.example .env   # fill in ANTHROPIC_API_KEY, OPENAI_API_KEY,
-                       # DATABASE_URL, REDIS_URL,
-                       # SEC_USER_AGENT ("Your Name your@email")
+# Copy the example env file and fill in your values
+cp .env.example .env
+```
 
-# 3. Start Redis (needed for the background ingest worker)
-redis-server --daemonize yes   # or: docker run -d -p 6379:6379 redis
+Open `.env` and set the following:
 
-# 4. Start the API
-uvicorn app.main:app --reload  # http://localhost:8000/health
+| Variable | What it is |
+|---|---|
+| `ANTHROPIC_API_KEY` | Claude API key (generation) |
+| `OPENAI_API_KEY` | OpenAI API key (embeddings only) |
+| `DATABASE_URL` | PostgreSQL connection string (must have pgvector enabled) |
+| `REDIS_URL` | Redis connection string (default: `redis://localhost:6379`) |
+| `SEC_USER_AGENT` | A descriptive string, e.g. `"Your Name your@email.com"` |
 
-# 5. Start the ingest worker (separate terminal — same codebase, different process)
+You also need to enable the `pgvector` extension on your database. Run once:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+```
+
+### 2. Running locally
+
+This app runs as **three separate processes** — start each in its own terminal:
+
+**Terminal 1 — Redis** (the job queue between the API and worker):
+```bash
+# Homebrew
+brew services start redis
+
+# or Docker
+docker run -d -p 6379:6379 redis:alpine
+```
+
+**Terminal 2 — API:**
+```bash
+source .venv/bin/activate
+uvicorn app.main:app --reload
+# → http://localhost:8000/health
+```
+
+**Terminal 3 — Ingest worker:**
+```bash
+source .venv/bin/activate
 arq app.worker.WorkerSettings
 ```
 
-You need two API keys: **Anthropic** (generation) and **OpenAI** (embeddings
-only). SEC EDGAR needs no key, just a descriptive `User-Agent`.
+Once all three are running, `POST /ask` with a `question` (and optionally a `conversation_id`) to start querying filings. The worker handles all ingestion in the background — the API and worker communicate through Redis.
 
-## How it works (Phases 1–4 implemented)
+### 3. Deployment recommendations
 
-1. **Ingest** — `POST /companies/{ticker}/ingest` pulls a company's recent
-   filings from EDGAR, splits them into chunks, embeds each chunk with OpenAI
-   (via HyDE for better retrieval alignment), and stores text + vector in Postgres.
-2. **Ask** — `POST /ask` runs an agentic loop: Claude calls `search_filings`
-   one or more times (with HyDE + pgvector retrieval), then calls `format_answer`
-   with a cited plain-English answer. Pass `conversation_id` to continue a prior
-   conversation; omit to start a new one.
+The service has two processes (API + worker) sharing one codebase, so you build a single Docker image and run it twice with different start commands.
 
-Conversations and per-message token telemetry are persisted to Postgres.
+**Recommended: Railway**
+- Works well if you already have an external Postgres (e.g. Supabase) — just point `DATABASE_URL` at it.
+- Add the built-in Redis plugin (free 25 MB tier is enough for a job queue).
+- Create two services from the same GitHub repo, override the start command per service:
+  - API: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+  - Worker: `arq app.worker.WorkerSettings`
+- Set `DATABASE_URL`, `REDIS_URL`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `SEC_USER_AGENT` as environment variables on both services.
+
+**Supabase note:** use the direct connection string (port 5432) for the worker — arq holds long-lived connections that don't play well with the connection pooler (port 6543).
+
+## How it works
+
+See `docs/how-it-works.md` for the full description.
 
 ## Roadmap
 
@@ -59,7 +97,7 @@ See `SPEC.md` for the full phased build plan. In short:
 - **Phase 2** ✅ Tool-calling: the model decides when to retrieve.
 - **Phase 3** ✅ Token efficiency: prompt caching, chunk dedup, HyDE on Haiku, usage logging.
 - **Phase 4** ✅ Conversational guidance: persistent conversations, simplified API, token telemetry.
-- **Phase 5** — Worker split + coverage tools + ingest job tracking.
+- **Phase 5** ✅ Worker split: arq background worker, ingest via agent tools, job tracking.
 - **Phase 6** — Action tools: year-over-year diffs + live stock prices.
 - **Phase 7** — New data sources (earnings calls, press releases).
 - **Phase 8** — Monitoring for new filings + an eval harness.
