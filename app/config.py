@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     # SEC requires a descriptive User-Agent: "Name email" — see SPEC.md.
     sec_user_agent: str = "sec-insight you@example.com"
 
-    # --- Market data (Phase 3) ---
+    # --- Market data (Phase 6) ---
     market_data_api_key: str = ""
 
     # --- API authentication (scripts / CLI) ---

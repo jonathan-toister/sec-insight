@@ -1,8 +1,8 @@
 # Getting started with Claude Code
 
-Phases 1–4 are implemented (plain RAG, tool-calling agent loop, token efficiency,
-persistent conversations). The next phase to build is Phase 5. Here's how to
-orient yourself and continue.
+Phases 1–5 are implemented (plain RAG, tool-calling agent loop, token efficiency,
+persistent conversations, async ingest worker). The next phase to build is Phase 6.
+Here's how to orient yourself and continue.
 
 ## 1. Open it
 
@@ -30,16 +30,15 @@ uvicorn app.main:app --reload
 # open http://localhost:8000/health  -> {"status":"ok"}
 ```
 
-## 3. Continue with Claude Code from Phase 5
+## 3. Continue with Claude Code from Phase 6
 
 The golden rule: **one phase at a time**, and run it before moving on. `SPEC.md`
-has the detailed steps; `CLAUDE.md` has the build order. Phases 1–4 are done.
+has the detailed steps; `CLAUDE.md` has the build order. Phases 1–5 are done.
 
-Good opening prompt for Phase 5:
+Good opening prompt for Phase 6:
 
-> "Read CLAUDE.md and spec/phase-5-worker-split.md. Phases 1–4 are fully
-> implemented. Start Phase 5: the async ingest worker, ingest job tracking table,
-> and coverage tools (list_companies, list_filings) in tools/registry.py.
+> "Read CLAUDE.md and spec/phase-6-actions-structured-data.md. Phases 1–5 are fully
+> implemented. Start Phase 6: the compare_filings and get_stock_price tools.
 > Show me the plan before coding."
 
 The existing implementation is a useful reference:
@@ -59,7 +58,8 @@ The existing implementation is a useful reference:
 
 ## 5. Next milestone
 
-Ingest one company (`POST /companies/AAPL/ingest`) and confirm `POST /ask` returns
-a cited answer. Then try a follow-up question using the returned `conversation_id`
-to verify conversational history works. That confirms Phases 1–4 are healthy in
-your environment before you start Phase 5.
+Ask the agent to ingest a company via `POST /ask` with a question like
+`"Please ingest AAPL's 2024 10-K"`. Confirm the job completes and that a
+follow-up question returns a cited answer. Then try a follow-up using the
+returned `conversation_id` to verify conversational history works. That
+confirms Phases 1–5 are healthy in your environment before you start Phase 6.

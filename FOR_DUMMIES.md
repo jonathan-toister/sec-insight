@@ -122,9 +122,9 @@ Both processes share the same Postgres database. The worker writes to the same t
 | Fetches new filings automatically | No — you upload manually | Yes — pulls from EDGAR live |
 | Works across many companies | No | Yes — ingest any ticker |
 | Cites the exact filing section | Loosely | Yes, mandatory |
-| Can compare two years of filings | No | Yes (Phase 3) |
-| Detects when new filings appear | No | Yes (Phase 4) |
-| Joins filing text with stock price | No | Yes (Phase 3) |
+| Can compare two years of filings | No | Planned (Phase 6) |
+| Detects when new filings appear | No | Planned (Phase 8) |
+| Joins filing text with stock price | No | Planned (Phase 6) |
 
 ---
 

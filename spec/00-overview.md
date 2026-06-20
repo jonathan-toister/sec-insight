@@ -12,7 +12,7 @@ Build phase by phase; don't skip ahead.
 | 2 — Tool-calling | [phase-2-tool-calling.md](phase-2-tool-calling.md) | ✅ Done |
 | 3 — Token efficiency baseline | [phase-3-token-efficiency.md](phase-3-token-efficiency.md) | ✅ Done |
 | 4 — Conversational guidance | [phase-4-conversational-guidance.md](phase-4-conversational-guidance.md) | ✅ Done |
-| 5 — Worker split + ingest tools + persistence | [phase-5-worker-split.md](phase-5-worker-split.md) | Planned |
+| 5 — Worker split + ingest tools + persistence | [phase-5-worker-split.md](phase-5-worker-split.md) | ✅ Done |
 | 6 — Actions + structured data | [phase-6-actions-structured-data.md](phase-6-actions-structured-data.md) | Planned |
 | 7 — New data sources | [phase-7-data-sources.md](phase-7-data-sources.md) | Planned |
 | 8 — Monitoring + evals | [phase-8-monitoring-evals.md](phase-8-monitoring-evals.md) | Planned |

@@ -21,7 +21,7 @@ Python · FastAPI · PostgreSQL + pgvector · SQLAlchemy · Anthropic Claude
 ```bash
 # Clone and create a Python virtual environment
 python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+pip3 install -r requirements.txt
 
 # Copy the example env file and fill in your values
 cp .env.example .env
