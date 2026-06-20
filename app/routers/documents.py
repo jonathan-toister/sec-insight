@@ -8,13 +8,14 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.dependencies import verify_api_key
 from app.db import get_session
 from app.models import Company, Filing
 
 router = APIRouter(tags=["filings"])
 
 
-@router.get("/filings")
+@router.get("/filings", dependencies=[Depends(verify_api_key)])
 async def list_indexed_filings(
     session: AsyncSession = Depends(get_session),
 ) -> list[dict[str, Any]]:

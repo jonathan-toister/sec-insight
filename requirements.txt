@@ -25,5 +25,8 @@ lxml
 arq
 redis[asyncio]
 
+# --- Auth ---
+PyJWT
+
 # --- Dev / eval ---
 pytest

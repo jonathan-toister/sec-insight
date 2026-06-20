@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.auth.dependencies import verify_api_key
 from app.db import get_session
 from app.models import Conversation, Message
 from app.rag.generate import run_agent
@@ -12,7 +13,7 @@ from app.schemas import AskRequest, AskResponse
 router = APIRouter(prefix="/ask", tags=["ask"])
 
 
-@router.post("", response_model=AskResponse)
+@router.post("", response_model=AskResponse, dependencies=[Depends(verify_api_key)])
 async def ask(
     http_request: Request,
     request: AskRequest,
