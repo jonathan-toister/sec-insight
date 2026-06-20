@@ -55,7 +55,10 @@ app/
   tools/           registry.py (5 tool schemas + dispatch: search_filings,
                    list_companies, list_filings, ingest_filing, check_ingest_status)
   market/          prices.py (market data client stub)          [Phase 6]
-  routers/         documents.py (GET /filings only), ask.py (POST /ask)
+  auth/            dependencies.py (verify_api_key — shared FastAPI dep),
+                   session.py (JWT create/verify for httpOnly cookies)
+  routers/         documents.py (GET /filings), ask.py (POST /ask),
+                   auth.py (POST /auth/login, POST /auth/logout)
 evals/             test_set.example.json + scoring              [Phase 8]
 scripts/           init_db.sql (enables pgvector)
 ```

@@ -1,5 +1,9 @@
 # `/ask` API — Frontend Integration Guide
 
+> **Authentication required.** Every call must include either an `X-API-Key`
+> header (for scripts/CLI) or the `sec_session` cookie set by `POST /auth/login`
+> (for browser clients). See `docs/frontend-auth.md` for the full auth setup.
+
 ## Endpoint
 
 ```

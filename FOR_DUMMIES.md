@@ -35,7 +35,9 @@ These are the raw documents this system reads.
 
 ## The APIs, plain English
 
-There is now only **one endpoint you interact with**: `POST /ask`. Everything — asking questions, ingesting new filings, and checking what's available — goes through the agent.
+The main endpoint is `POST /ask` — asking questions, ingesting new filings, and checking what's available all go through the agent. There are also two auth endpoints and one diagnostic endpoint described below.
+
+All endpoints except `/health` require authentication: either an `X-API-Key` header (for scripts/CLI) or a browser session cookie set by `/auth/login`.
 
 ### `POST /ask`
 > *"Talk to the agent. It figures out what to do."*
@@ -78,6 +80,20 @@ The agent looks it up in the database and tells you exactly what's available and
 > *"What have you already indexed?"*
 
 Still available as a plain diagnostic endpoint. Lists every filing in the database with its ticker, form type, and fiscal year.
+
+---
+
+### `POST /auth/login`
+> *"Log in so the browser can make API calls."*
+
+Send `{ "password": "..." }` with the value of `LOGIN_PASSWORD` from the server's `.env`. On success the server sets an httpOnly session cookie (`sec_session`) that the browser sends automatically on all subsequent requests. Used by the frontend app; scripts should use the `X-API-Key` header instead.
+
+---
+
+### `POST /auth/logout`
+> *"Clear the session cookie."*
+
+No body required. Deletes the `sec_session` cookie.
 
 ---
 

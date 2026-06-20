@@ -22,6 +22,8 @@ Then edit `.env`:
 - `ANTHROPIC_API_KEY` — from console.anthropic.com (generation).
 - `OPENAI_API_KEY` — from platform.openai.com (embeddings only).
 - `SEC_USER_AGENT` — set to `"Your Name your@email.com"` (SEC requires this).
+- `API_KEY` — generate with `python3 -c "import secrets; print(secrets.token_hex(32))"`. Required to call `/ask` and `/filings` from scripts or the CLI.
+- `LOGIN_PASSWORD` + `JWT_SECRET` — only needed for the browser frontend; skip for now if you're working from the terminal.
 
 Sanity check the API skeleton:
 

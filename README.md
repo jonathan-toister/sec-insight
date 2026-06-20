@@ -36,6 +36,10 @@ Open `.env` and set the following:
 | `DATABASE_URL` | PostgreSQL connection string (must have pgvector enabled) |
 | `REDIS_URL` | Redis connection string (default: `redis://localhost:6379`) |
 | `SEC_USER_AGENT` | A descriptive string, e.g. `"Your Name your@email.com"` |
+| `API_KEY` | Secret key for script/CLI access (`X-API-Key` header). Generate: `python3 -c "import secrets; print(secrets.token_hex(32))"` |
+| `LOGIN_PASSWORD` | Password for the browser login screen (`POST /auth/login`) |
+| `JWT_SECRET` | Signs session cookies. Generate the same way as `API_KEY` |
+| `ALLOWED_ORIGINS` | Comma-separated frontend origins, e.g. `https://my-app.vercel.app,http://localhost:3000` |
 
 You also need to enable the `pgvector` extension on your database. Run once:
 
