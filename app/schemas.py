@@ -15,6 +15,8 @@ class ChunkResult(BaseModel):
     form_type: str
     fiscal_year: int | None
     section: str | None
+    item_number: str | None = None
+    heading: str | None = None
     text: str
     distance: float
     highlights: list[str] = Field(default_factory=list)

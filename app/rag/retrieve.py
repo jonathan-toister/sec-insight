@@ -11,6 +11,7 @@ class FilingFilter(BaseModel):
     ticker: str | None = None
     form_type: str | None = None
     fiscal_year: int | None = None
+    item_number: str | None = None
 
 
 async def retrieve(
@@ -28,6 +29,8 @@ async def retrieve(
             Chunk.id,
             Chunk.filing_id,
             Chunk.section,
+            Chunk.item_number,
+            Chunk.heading,
             Chunk.text,
             Company.name.label("company"),
             Company.ticker,
@@ -49,6 +52,8 @@ async def retrieve(
             stmt = stmt.where(Filing.form_type == filters.form_type)
         if filters.fiscal_year:
             stmt = stmt.where(Filing.fiscal_year == filters.fiscal_year)
+        if filters.item_number:
+            stmt = stmt.where(Chunk.item_number == filters.item_number.upper())
 
     rows = (await session.execute(stmt)).all()
 
@@ -61,6 +66,8 @@ async def retrieve(
             form_type=row.form_type,
             fiscal_year=row.fiscal_year,
             section=row.section,
+            item_number=row.item_number,
+            heading=row.heading,
             text=row.text,
             distance=float(row.distance),
         )

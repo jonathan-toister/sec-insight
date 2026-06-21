@@ -13,17 +13,29 @@ Build phase by phase; don't skip ahead.
 | 3 — Token efficiency baseline | [phase-3-token-efficiency.md](phase-3-token-efficiency.md) | ✅ Done |
 | 4 — Conversational guidance | [phase-4-conversational-guidance.md](phase-4-conversational-guidance.md) | ✅ Done |
 | 5 — Worker split + ingest tools + persistence | [phase-5-worker-split.md](phase-5-worker-split.md) | ✅ Done |
-| 6 — Actions + structured data | [phase-6-actions-structured-data.md](phase-6-actions-structured-data.md) | Planned |
-| 7 — New data sources | [phase-7-data-sources.md](phase-7-data-sources.md) | Planned |
-| 8 — Monitoring + evals | [phase-8-monitoring-evals.md](phase-8-monitoring-evals.md) | Planned |
+| 6 — Schema hardening + data integrity | [phase-6-schema-hardening.md](phase-6-schema-hardening.md) | Planned |
+| 7 — Section-aware ingestion + retrieval | [phase-7-section-aware-retrieval.md](phase-7-section-aware-retrieval.md) | Planned |
+| 8 — Structured financials (XBRL) | [phase-8-structured-financials-xbrl.md](phase-8-structured-financials-xbrl.md) | Planned |
+| 9 — Prices + macro | [phase-9-prices-macro.md](phase-9-prices-macro.md) | Planned |
+| 10 — Valuation engine + model registry | [phase-10-valuation-engine.md](phase-10-valuation-engine.md) | Planned |
+| 11 — Sector context | [phase-11-sector-context.md](phase-11-sector-context.md) | Planned |
+| 12 — Qualitative event extraction | [phase-12-event-extraction.md](phase-12-event-extraction.md) | Planned |
+| 13 — Monitoring + evals | [phase-13-monitoring-evals.md](phase-13-monitoring-evals.md) | Planned |
 
-Phases 1–2 are the original spec, unchanged. Phases 3–8 reorganize the original
-phases 3–4 around four goals: token/context efficiency (phase 3, deliberately
-before the conversation features that would multiply its absence); an
-interactive, guiding chat with multi-turn history (4) and persisted
-conversations (5); a right-sized microservice split (5); and broader data
-sources (7). The original phase 3 became phase 6, the original phase 4 became
-phase 8.
+Phases 1–5 are built. Phases 6–13 turn the RAG-over-filings engine into a
+long-term investing analyst. They go **improvements first, then additions**:
+phases 6–7 harden the existing schema and make retrieval section-aware; phases
+8–9 add structured data (XBRL fundamentals, prices, macro); phases 10–11 add the
+valuation engine and sector context that consume it; phase 12 extracts
+qualitative signals (management changes, products, insiders); phase 13 makes the
+system proactive and measurable. The old planned phases (actions+structured
+data, data sources, monitoring+evals) are absorbed here — their good ideas
+(`compare_filings`, the XBRL source, the citation/`source_type` model, the eval
+harness) live on inside the relevant new phase.
+
+**Dependencies:** 10 needs 8+9; 11 needs 8; 12 needs 7; 13 needs 12. The whole
+arc keeps to the four differentiators — live ingestion, structured-data joins,
+actions, monitoring — over a nicer chatbot.
 
 ## Goal and non-goals
 
@@ -50,8 +62,23 @@ Five tables (pgvector for the embedding column):
   created_at, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
   model, latency_ms`. One row per turn; assistant messages carry full token telemetry.
 
-Phase 5 adds ingest jobs; phase 7 adds `source_type` on filings/chunks plus a
-structured-financials table.
+Phase 5 adds ingest jobs. Phases 6–13 extend the model:
+
+- **Phase 6** adds `period_of_report` / `accession_number` / `source_type` on
+  `filings`, `sector`/`industry`/`fiscal_year_end` on `companies`, and a
+  point-in-time contract (`period_of_report` + `filed_at` on every fact).
+- **Phase 7** adds `item_number` / `is_table` / `heading` / `fiscal_year` on
+  `chunks`.
+- **Phase 8** adds `financial_facts` + `metric_dimensions` (XBRL, queried by
+  SQL, not embedded).
+- **Phase 9** adds `prices` + `macro_series`.
+- **Phase 10** adds `valuation_models` (registry) + `valuations` (cache).
+- **Phase 11** adds `sectors` / `sector_profiles` + `company_peers`.
+- **Phase 12** adds `management_changes`, `product_events`,
+  `insider_transactions`, each linked to an `evidence_chunk_id` for citation.
+
+Guiding rule across all of them: extract structure at ingest, query it as rows,
+retrieve text only to explain — the analytical and token-efficiency win at once.
 
 ## Data source: SEC EDGAR
 
@@ -66,17 +93,41 @@ roughly 10 requests/second max.
 
 ## Chunking
 
-- Target ~500–800 tokens per chunk, ~10–15% overlap so meaning isn't cut mid-idea.
-- Split on section / paragraph boundaries where possible. 10-Ks have named items
-  (e.g. "Item 1A. Risk Factors") — keep the section heading in chunk metadata; it
-  makes retrieval and citations far better.
-- Store `section` and `chunk_index` so answers can cite "10-K 2024, Item 1A".
+Phase 7 upgrades ingestion to a three-pass pipeline:
+1. **Section split** — identify Item boundaries from HTML heading structure (extracted
+   before HTML is stripped) plus a regex fallback. Chunks never cross Item boundaries.
+2. **Paragraph split** — within each section, split at paragraph boundaries to reach
+   the target chunk size (~500–800 tokens).
+3. **Sentence alignment** — trim or extend any boundary that falls mid-sentence. A
+   chunk must never begin or end in the middle of a sentence.
+
+Store `item_number`, `heading`, and `chunk_index` per chunk for scoped retrieval and
+citations ("10-K 2024, Item 1A").
 
 ## Embeddings
 
 - OpenAI `text-embedding-3-small`, 1536 dims. Batch many chunks per API call.
 - The identical function embeds questions at query time. One implementation,
   reused — never two.
+
+## Cross-referencing architecture (Phases 8–13)
+
+Each data type is stored in the format that fits its access pattern:
+
+- **Text** (filing narrative) → pgvector chunks, retrieved by cosine similarity.
+- **Structured numbers** (XBRL facts, prices, macro) → SQL rows, queried directly.
+- **Events** (management changes, product transitions, insider activity) → typed rows
+  with `evidence_chunk_id` linking back to the source chunk for citation.
+- **Valuations** → cached result rows in `valuations` table; inputs traceable to
+  `financial_facts` / `prices` / `macro_series`.
+
+The agent loop keeps these streams separate: text chunks flow into the existing
+`all_chunks` accumulator; structured data is formatted inline in tool-result strings.
+For investment propositions, the **`analyze_company(ticker, focus=[])` compound tool**
+(added in Phase 10) batches financials + prices + valuation + sector context into one
+call, keeping full-analysis turns to ~3–4 instead of 8+. A dedicated
+`"investment_analysis"` response type for `format_answer` (also Phase 10) structures
+the final answer into summary, valuation, risk, and verdict sections.
 
 ## Stretch (after Phase 8)
 

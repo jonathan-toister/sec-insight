@@ -1,11 +1,11 @@
 """Tool-calling registry — Phase 5."""
 import asyncio
 
-from sqlalchemy import select
+from sqlalchemy import func as sqlfunc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ingest.embed import embed_texts
-from app.models import Company, Filing, IngestJob
+from app.models import Chunk, Company, Filing, IngestJob
 from app.rag.hyde import generate_hypothetical_document
 from app.rag.retrieve import FilingFilter, retrieve
 from app.schemas import ChunkResult
@@ -16,7 +16,9 @@ TOOL_SCHEMAS: list[dict] = [
         "description": (
             "Search SEC filings for relevant information. "
             "Use this to find specific data in 10-K or 10-Q filings. "
-            "ticker is required — extract it from the question."
+            "ticker is required — extract it from the question. "
+            "Use item_number to restrict to a specific section (e.g. '1A' for Risk Factors, "
+            "'7' for MD&A, '8' for Financial Statements)."
         ),
         "input_schema": {
             "type": "object",
@@ -37,6 +39,14 @@ TOOL_SCHEMAS: list[dict] = [
                 "fiscal_year": {
                     "type": "integer",
                     "description": "Optional fiscal year filter (e.g. 2023).",
+                },
+                "item_number": {
+                    "type": "string",
+                    "description": (
+                        "Optional SEC Item number filter (e.g. '1' for Business, "
+                        "'1A' for Risk Factors, '7' for MD&A, '8' for Financial Statements). "
+                        "Scopes retrieval to that section only."
+                    ),
                 },
                 "k": {
                     "type": "integer",
@@ -122,6 +132,33 @@ TOOL_SCHEMAS: list[dict] = [
             "required": ["job_id"],
         },
     },
+    {
+        "name": "get_filing",
+        "description": (
+            "Retrieve the section structure of a specific indexed filing — returns its "
+            "Item numbers and headings with chunk counts. Use this before a targeted "
+            "search to see which sections are available, or to orient section-level comparisons."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "ticker": {
+                    "type": "string",
+                    "description": "Stock ticker of the company (e.g. 'AAPL').",
+                },
+                "form_type": {
+                    "type": "string",
+                    "enum": ["10-K", "10-Q"],
+                    "description": "Filing type.",
+                },
+                "fiscal_year": {
+                    "type": "integer",
+                    "description": "Fiscal year of the filing (e.g. 2024).",
+                },
+            },
+            "required": ["ticker", "form_type", "fiscal_year"],
+        },
+    },
 ]
 
 _VALID_FORM_TYPES = {"10-K", "10-Q"}
@@ -150,11 +187,16 @@ def _validate_search_args(args: dict) -> dict:
         k = 6
     k = max(1, min(20, k))
 
+    item_number = args.get("item_number")
+    if item_number is not None:
+        item_number = str(item_number).strip().upper()
+
     return {
         "query": query.strip(),
         "ticker": ticker.strip().upper(),
         "form_type": form_type,
         "fiscal_year": args.get("fiscal_year"),
+        "item_number": item_number,
         "k": k,
     }
 
@@ -176,7 +218,9 @@ def _format_result_chunks(
             header = f"[{idx}] {chunk.company} {chunk.form_type}"
             if chunk.fiscal_year:
                 header += f" FY{chunk.fiscal_year}"
-            if chunk.section:
+            if chunk.item_number and chunk.heading:
+                header += f" — Item {chunk.item_number}. {chunk.heading}"
+            elif chunk.section:
                 header += f" — {chunk.section}"
             parts.append(f"{header}\n{chunk.text}")
             new_chunks.append(chunk)
@@ -196,6 +240,7 @@ async def handle_search_filings(
         ticker=args["ticker"],
         form_type=args.get("form_type"),
         fiscal_year=args.get("fiscal_year"),
+        item_number=args.get("item_number"),
     )
     chunks = await retrieve(
         embedding=embeddings[0],
@@ -283,6 +328,58 @@ async def handle_list_filings(args: dict, session: AsyncSession) -> str:
         return f"No filings found for {subject}."
 
     return f"Filing coverage ({len(lines)} entries):\n" + "\n".join(lines)
+
+
+async def handle_get_filing(args: dict, session: AsyncSession) -> str:
+    ticker = str(args.get("ticker", "")).strip().upper()
+    form_type = str(args.get("form_type", "")).strip()
+    fiscal_year = args.get("fiscal_year")
+
+    if not ticker:
+        return "Error: 'ticker' is required."
+    if form_type not in _VALID_FORM_TYPES:
+        return f"Error: 'form_type' must be one of {sorted(_VALID_FORM_TYPES)}."
+    if not isinstance(fiscal_year, int):
+        return "Error: 'fiscal_year' must be an integer."
+
+    filing_row = await session.scalar(
+        select(Filing.id)
+        .join(Company, Filing.company_id == Company.id)
+        .where(Company.ticker == ticker)
+        .where(Filing.form_type == form_type)
+        .where(Filing.fiscal_year == fiscal_year)
+    )
+
+    if filing_row is None:
+        return (
+            f"No indexed filing found for {ticker} {form_type} FY{fiscal_year}. "
+            "Use list_filings to see what is available, or ingest_filing to index it."
+        )
+
+    # Group chunks by item_number + heading, count them
+    rows = (
+        await session.execute(
+            select(
+                Chunk.item_number,
+                Chunk.heading,
+                sqlfunc.count(Chunk.id).label("chunk_count"),
+            )
+            .where(Chunk.filing_id == filing_row)
+            .group_by(Chunk.item_number, Chunk.heading)
+            .order_by(Chunk.item_number.nulls_first(), Chunk.heading)
+        )
+    ).all()
+
+    if not rows:
+        return f"Filing {ticker} {form_type} FY{fiscal_year} is indexed but has no chunks."
+
+    lines = [f"{ticker} {form_type} FY{fiscal_year} — sections:"]
+    for r in rows:
+        item = f"Item {r.item_number}" if r.item_number else "(preamble)"
+        hdg = f". {r.heading}" if r.heading else ""
+        lines.append(f"  {item}{hdg}  [{r.chunk_count} chunks]")
+
+    return "\n".join(lines)
 
 
 async def handle_ingest_filing(
@@ -467,5 +564,8 @@ async def dispatch(
 
     if tool_name == "check_ingest_status":
         return await handle_check_ingest_status(args, session)
+
+    if tool_name == "get_filing":
+        return await handle_get_filing(args, session)
 
     raise ValueError(f"Unknown tool '{tool_name}'.")

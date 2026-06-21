@@ -2,7 +2,7 @@
 from datetime import date, datetime
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import BigInteger, Date, DateTime, ForeignKey, Integer, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Index, Integer, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -25,13 +25,19 @@ class Company(Base):
     state_of_incorporation: Mapped[str | None] = mapped_column(Text, nullable=True)
     exchanges: Mapped[str | None] = mapped_column(Text, nullable=True)
     entity_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sector: Mapped[str | None] = mapped_column(Text, nullable=True)
+    industry: Mapped[str | None] = mapped_column(Text, nullable=True)
+    fiscal_year_end: Mapped[str | None] = mapped_column(Text, nullable=True)  # "MMDD"
 
     filings: Mapped[list["Filing"]] = relationship(back_populates="company_rel")
 
 
 class Filing(Base):
     __tablename__ = "filings"
-    __table_args__ = (UniqueConstraint("url"),)
+    __table_args__ = (
+        UniqueConstraint("url"),
+        Index("ix_filings_company_period", "company_id", "period_of_report"),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     company_id: Mapped[int] = mapped_column(
@@ -41,6 +47,9 @@ class Filing(Base):
     fiscal_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
     url: Mapped[str] = mapped_column(Text, nullable=False)
     filed_at: Mapped[date | None] = mapped_column(Date, nullable=True)
+    period_of_report: Mapped[date | None] = mapped_column(Date, nullable=True)
+    accession_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_type: Mapped[str] = mapped_column(Text, nullable=False, server_default="sec_filing")
 
     company_rel: Mapped["Company"] = relationship(back_populates="filings")
     chunks: Mapped[list["Chunk"]] = relationship(back_populates="filing")
@@ -48,6 +57,7 @@ class Filing(Base):
 
 class Chunk(Base):
     __tablename__ = "chunks"
+    __table_args__ = (Index("ix_chunks_filing_id", "filing_id"),)
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     filing_id: Mapped[int] = mapped_column(
@@ -55,6 +65,10 @@ class Chunk(Base):
     )
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     section: Mapped[str | None] = mapped_column(Text, nullable=True)
+    item_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+    heading: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_table: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    fiscal_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     embedding: Mapped[list[float] | None] = mapped_column(
         Vector(settings.embedding_dim), nullable=True
