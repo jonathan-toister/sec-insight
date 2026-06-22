@@ -137,10 +137,12 @@ Both processes share the same Postgres database. The worker writes to the same t
 |---|---|---|
 | Fetches new filings automatically | No — you upload manually | Yes — pulls from EDGAR live |
 | Works across many companies | No | Yes — ingest any ticker |
-| Cites the exact filing section | Loosely | Yes, mandatory |
-| Can compare two years of filings | No | Planned (Phase 6) |
-| Detects when new filings appear | No | Planned (Phase 8) |
-| Joins filing text with stock price | No | Planned (Phase 6) |
+| Cites the exact filing section (Item 1A, etc.) | Loosely | Yes, mandatory (Phase 7) |
+| Revenue / EPS / FCF as real numbers | No | Yes — XBRL structured data (Phase 8) |
+| Can compare two years of filings | No | Planned (Phase 13) |
+| Detects when new filings appear | No | Planned (Phase 13) |
+| Joins filing text with live stock price | No | Planned (Phase 9) |
+| Valuation models (DCF, multiples) | No | Planned (Phase 10) |
 
 ---
 
@@ -153,6 +155,11 @@ Both processes share the same Postgres database. The worker writes to the same t
 | **Phase 3** | Token efficiency: prompt caching, chunk dedup, HyDE on Haiku, usage logging | ✅ Done |
 | **Phase 4** | Conversational memory: follow-up questions work; conversations saved to DB | ✅ Done |
 | **Phase 5** | Background ingest worker; ingest via the agent; coverage tools (`list_companies`, `list_filings`) | ✅ Done |
-| **Phase 6** | AI can fetch stock prices and diff two filings year-over-year | Planned |
-| **Phase 7** | New data sources: earnings calls, press releases | Planned |
-| **Phase 8** | Auto-detects new filings; answers are scored automatically | Planned |
+| **Phase 6** | Schema hardening: filing dates, accession numbers, company sector/industry, point-in-time data contract | ✅ Done |
+| **Phase 7** | Section-aware ingestion: chunks know which Item they came from; `get_filing` tool; section-scoped search | ✅ Done |
+| **Phase 8** | Structured financials (XBRL): revenue, EPS, FCF queryable as real numbers — not text search | ✅ Done |
+| **Phase 9** | Live stock prices + macro data (risk-free rate, GDP growth) | Planned |
+| **Phase 10** | Valuation models: DCF, reverse-DCF, P/E multiples, Graham number | Planned |
+| **Phase 11** | Sector context: peer comparisons, sector-median multiples | Planned |
+| **Phase 12** | Qualitative signals: management changes, product pipeline, insider activity | Planned |
+| **Phase 13** | Monitoring: auto-detect new filings, diff what changed; eval harness to score answers | Planned |

@@ -102,9 +102,14 @@ See `SPEC.md` for the full phased build plan. In short:
 - **Phase 3** ✅ Token efficiency: prompt caching, chunk dedup, HyDE on Haiku, usage logging.
 - **Phase 4** ✅ Conversational guidance: persistent conversations, simplified API, token telemetry.
 - **Phase 5** ✅ Worker split: arq background worker, ingest via agent tools, job tracking.
-- **Phase 6** — Action tools: year-over-year diffs + live stock prices.
-- **Phase 7** — New data sources (earnings calls, press releases).
-- **Phase 8** — Monitoring for new filings + an eval harness.
+- **Phase 6** ✅ Schema hardening: `period_of_report`, `accession_number`, `sector/industry` on companies; point-in-time contract.
+- **Phase 7** ✅ Section-aware ingestion: 3-pass chunker, `item_number`/`heading` on chunks, `get_filing` tool.
+- **Phase 8** ✅ Structured financials (XBRL): `financial_facts` table, `get_financials` tool — numeric queries bypass vector search.
+- **Phase 9** — Prices + macro: Stooq EOD prices, FRED macro series, `get_price`/`get_macro` tools.
+- **Phase 10** — Valuation engine: DCF, reverse-DCF, multiples, Graham number, `run_valuation` tool.
+- **Phase 11** — Sector context: peer comparison, sector-median multiples.
+- **Phase 12** — Qualitative event extraction: management changes, product pipeline, insider activity.
+- **Phase 13** — Monitoring + evals: auto-detect new filings, `compare_filings` tool, eval harness.
 
 ## Project files
 

@@ -1,6 +1,6 @@
-# How SEC Insight Works — Phases 2–5: The Agent Loop + Ingest Worker
+# How SEC Insight Works — Phases 2–8: The Agent Loop, Ingest Worker, and Structured Data
 
-This document explains how the `/ask` endpoint works after Phases 2–4. No finance or ML background needed.
+This document explains how the `/ask` endpoint works through Phase 8. No finance or ML background needed.
 
 ---
 
@@ -48,6 +48,28 @@ usage is logged per request.
 just send a `question` (and optionally a `conversation_id` to continue a prior
 conversation). Prior turns are loaded from Postgres and fed as history into the
 agent loop so follow-up questions have context.
+
+**Phase 5** moved all ingestion out of the API and into a separate arq background
+worker. A filing can take minutes to ingest; running that inline would time out
+the HTTP connection. Now the API enqueues a job to Redis, the worker picks it up,
+and the agent polls for completion. Four tools handle this: `list_companies`,
+`list_filings`, `ingest_filing`, `check_ingest_status`.
+
+**Phases 6 + 7** hardened the data model and made retrieval section-aware. Phase 6
+added `period_of_report` and `accession_number` to every filing and
+`sector`/`industry` to every company — establishing a point-in-time contract so
+facts never leak across filing dates. Phase 7 upgraded the chunker to a three-pass
+pipeline (section → paragraph → sentence boundary) that records which Item each
+chunk belongs to (`item_number`, `heading`, `is_table`). The `get_filing` tool
+lets the agent look up a specific filing's metadata, and `search_filings` gained
+`item_number` and `fiscal_year` filters for section-scoped retrieval.
+
+**Phase 8** added XBRL structured financials. Rather than asking Claude to extract
+revenue from prose, EDGAR's machine-readable XBRL data is fetched at ingest time,
+parsed into canonical metric rows (`financial_facts` table), and queried directly
+by the `get_financials` tool. Numeric questions (revenue, EPS, FCF) bypass vector
+search entirely — faster, cheaper, and less error-prone than text retrieval for
+numbers.
 
 ---
 
@@ -168,11 +190,21 @@ This is what happens inside `run_agent()` for a real SEC question:
 
 ## The Tools
 
-Claude has two tools available in Phase 2:
+Claude has seven tools available as of Phase 8:
+
+| Tool | Added | What it does |
+|---|---|---|
+| `search_filings` | Phase 2 | Vector search over filing chunks. Required: `ticker`, `query`. Optional: `form_type`, `fiscal_year`, `item_number`, `k`. |
+| `list_companies` | Phase 5 | Returns all tickers that have at least one filing indexed. |
+| `list_filings` | Phase 5 | Returns each filing's status (`ingested`, `ingesting`, `failed`) for a ticker. |
+| `ingest_filing` | Phase 5 | Queues a background job to fetch and index a filing. Idempotent. |
+| `check_ingest_status` | Phase 5 | Reads job status from Postgres. `wait=true` polls until done. |
+| `get_filing` | Phase 7 | Returns metadata for a specific filing (period, accession number, section map). |
+| `get_financials` | Phase 8 | Queries XBRL facts directly by SQL — use for any numeric question (revenue, EPS, FCF). Faster and more accurate than text search for numbers. |
 
 ### `search_filings` — find information in indexed filings
 
-Claude calls this when it needs to look something up.
+Claude calls this when it needs to look up qualitative information (risks, strategy, management discussion).
 
 | Argument | Required? | What it is |
 |---|---|---|
@@ -180,6 +212,7 @@ Claude calls this when it needs to look something up.
 | `ticker` | **Yes** | Company stock symbol (e.g. "KO", "AAPL") |
 | `form_type` | No | Filter to `10-K` or `10-Q` only |
 | `fiscal_year` | No | Filter to a specific year (e.g. `2023`) |
+| `item_number` | No | Restrict to a specific Item (e.g. `"1A"` for Risk Factors) |
 | `k` | No | How many results to return (1–20, default 6) |
 
 **Why is `ticker` required?** Without knowing the company, we'd search across all indexed filings and get irrelevant results. Claude must identify the company from your question before searching.
@@ -243,17 +276,30 @@ Validation errors don't crash the server. They're returned to Claude as a tool r
 app/
 ├── routers/ask.py          Entry point. Calls run_agent(), returns AskResponse.
 │
-├── rag/generate.py         The loop lives here.
-│   ├── run_agent()         Main agentic loop — max 10 turns
-│   ├── _AGENT_SYSTEM_PROMPT  Tells Claude the rules and when to use each tool
-│   └── _FORMAT_TOOL        Schema for the format_answer tool
+├── rag/
+│   ├── generate.py         The loop lives here.
+│   │   ├── run_agent()     Main agentic loop — max 10 turns
+│   │   └── _FORMAT_TOOL    Schema for the format_answer tool
+│   └── hyde.py             HyDE query expansion (runs on Haiku)
 │
-└── tools/registry.py       Tool definitions + handlers.
-    ├── TOOL_SCHEMAS        The search_filings JSON schema Claude sees
-    ├── dispatch()          Routes a tool call to the right handler
-    ├── _validate_search_args()  Arg validation before any DB call
-    ├── handle_search_filings()  Embeds query (via HyDE) → vector search → return chunks
-    └── _format_result_chunks()  Deduplicates chunks seen in prior searches
+├── tools/registry.py       All tool definitions + handlers.
+│   ├── TOOL_SCHEMAS        7 tool schemas Claude sees
+│   ├── dispatch()          Routes a tool call to the right handler
+│   ├── handle_search_filings()   HyDE + embed → vector search → deduplicated chunks
+│   ├── handle_get_filing()       Filing metadata lookup by ticker/form/year
+│   ├── handle_get_financials()   XBRL fact query (SQL, not vector search)
+│   ├── handle_ingest_filing()    Enqueue arq job + create IngestJob row
+│   └── handle_check_ingest_status()  Poll Postgres for job state
+│
+├── ingest/
+│   ├── pipeline.py         upsert_company() + ingest_one_filing() — shared ingest logic
+│   ├── edgar.py            SEC EDGAR client (fetch filings, extract section_map from HTML)
+│   ├── chunk.py            3-pass chunker: section → paragraph → sentence alignment
+│   ├── embed.py            OpenAI embeddings (same function at ingest and query time)
+│   └── xbrl.py             Fetch + parse XBRL company facts → upsert financial_facts rows
+│
+├── worker.py               arq WorkerSettings + ingest_filing_task
+└── models.py               All SQLAlchemy models including Phase 6–8 additions
 ```
 
 ---

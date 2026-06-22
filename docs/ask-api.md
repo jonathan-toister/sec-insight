@@ -84,6 +84,8 @@ The raw source passages Claude used to generate the answer. Each object is a
   "form_type": "10-K",
   "fiscal_year": 2023,
   "section": "Risk Factors",
+  "item_number": "1A",
+  "heading": "Risk Factors",
   "text": "Full text of the retrieved passage ...",
   "distance": 0.18,
   "highlights": [
@@ -100,6 +102,8 @@ The raw source passages Claude used to generate the answer. Each object is a
 | `form_type` | Filing type (e.g. `10-K`, `10-Q`) |
 | `fiscal_year` | Fiscal year the filing covers |
 | `section` | Section of the filing this chunk came from (e.g. `Risk Factors`) |
+| `item_number` | Filing Item number (e.g. `"1A"`, `"7"`) — `null` if section detection did not match a named Item |
+| `heading` | Human-readable section heading (e.g. `"Risk Factors"`) — `null` when `item_number` is null |
 | `text` | The full retrieved passage. Show this in a collapsible "source" card. |
 | `distance` | Cosine distance (0 = identical, 1 = unrelated). Lower = more relevant. |
 | `highlights` | **Verbatim substrings** from `text` that are most relevant to the question. |
@@ -128,7 +132,7 @@ short span stands out — in that case show the full `text` without markup.
 #### Suggested source panel layout
 
 - Sort chunks by `distance` ascending (most relevant first).
-- Show a label: `{company} {form_type} FY{fiscal_year} — {section}`.
+- Show a label: `{company} {form_type} FY{fiscal_year} — Item {item_number}. {heading}` (fall back to `{section}` when `item_number` is null).
 - Show the `text` with highlights applied.
 - Use `distance` to drive visual ranking (e.g. a relevance badge or faded
   styling for chunks with `distance > 0.35`).

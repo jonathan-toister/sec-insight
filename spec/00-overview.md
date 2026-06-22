@@ -13,16 +13,16 @@ Build phase by phase; don't skip ahead.
 | 3 — Token efficiency baseline | [phase-3-token-efficiency.md](phase-3-token-efficiency.md) | ✅ Done |
 | 4 — Conversational guidance | [phase-4-conversational-guidance.md](phase-4-conversational-guidance.md) | ✅ Done |
 | 5 — Worker split + ingest tools + persistence | [phase-5-worker-split.md](phase-5-worker-split.md) | ✅ Done |
-| 6 — Schema hardening + data integrity | [phase-6-schema-hardening.md](phase-6-schema-hardening.md) | Planned |
-| 7 — Section-aware ingestion + retrieval | [phase-7-section-aware-retrieval.md](phase-7-section-aware-retrieval.md) | Planned |
-| 8 — Structured financials (XBRL) | [phase-8-structured-financials-xbrl.md](phase-8-structured-financials-xbrl.md) | Planned |
+| 6 — Schema hardening + data integrity | [phase-6-schema-hardening.md](phase-6-schema-hardening.md) | ✅ Done |
+| 7 — Section-aware ingestion + retrieval | [phase-7-section-aware-retrieval.md](phase-7-section-aware-retrieval.md) | ✅ Done |
+| 8 — Structured financials (XBRL) | [phase-8-structured-financials-xbrl.md](phase-8-structured-financials-xbrl.md) | ✅ Done |
 | 9 — Prices + macro | [phase-9-prices-macro.md](phase-9-prices-macro.md) | Planned |
 | 10 — Valuation engine + model registry | [phase-10-valuation-engine.md](phase-10-valuation-engine.md) | Planned |
 | 11 — Sector context | [phase-11-sector-context.md](phase-11-sector-context.md) | Planned |
 | 12 — Qualitative event extraction | [phase-12-event-extraction.md](phase-12-event-extraction.md) | Planned |
 | 13 — Monitoring + evals | [phase-13-monitoring-evals.md](phase-13-monitoring-evals.md) | Planned |
 
-Phases 1–5 are built. Phases 6–13 turn the RAG-over-filings engine into a
+Phases 1–8 are built. Phases 9–13 turn the RAG-over-filings engine into a
 long-term investing analyst. They go **improvements first, then additions**:
 phases 6–7 harden the existing schema and make retrieval section-aware; phases
 8–9 add structured data (XBRL fundamentals, prices, macro); phases 10–11 add the
