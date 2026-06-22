@@ -11,7 +11,8 @@ from fastapi.middleware.cors import CORSMiddleware
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s: %(message)s")
 
 from app.config import settings
-from app.db import create_redis_pool, engine
+from app.db import AsyncSessionLocal, create_redis_pool, engine
+from app.ingest.xbrl import seed_metric_dimensions
 from app.models import Base
 from app.routers import ask as ask_router
 from app.routers import documents as documents_router
@@ -22,6 +23,9 @@ from app.routers import auth as auth_router
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    async with AsyncSessionLocal() as session:
+        await seed_metric_dimensions(session)
+        await session.commit()
     app.state.arq_redis = await create_redis_pool()
     yield
     await app.state.arq_redis.aclose()

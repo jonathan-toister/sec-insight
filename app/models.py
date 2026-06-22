@@ -1,8 +1,9 @@
 """SQLAlchemy ORM models."""
 from datetime import date, datetime
+from decimal import Decimal
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Index, Integer, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Index, Integer, Numeric, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -134,8 +135,41 @@ class IngestJob(Base):
         ForeignKey("conversations.id", ondelete="SET NULL"),
         nullable=True,
     )
+    pending_fact_ids: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list of FinancialFact.id
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class MetricDimension(Base):
+    __tablename__ = "metric_dimensions"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    xbrl_tag: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    canonical_name: Mapped[str] = mapped_column(Text, nullable=False)
+    statement: Mapped[str | None] = mapped_column(Text, nullable=True)  # income_statement | balance_sheet | cash_flow
+    sign: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    unit_expected: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class FinancialFact(Base):
+    __tablename__ = "financial_facts"
+    __table_args__ = (
+        UniqueConstraint("company_id", "metric_canonical", "fiscal_period", "fiscal_year", "accession"),
+        Index("ix_ff_company_metric", "company_id", "metric_canonical"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    company_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("companies.id"), nullable=False)
+    filing_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("filings.id", ondelete="SET NULL"), nullable=True)
+    accession: Mapped[str] = mapped_column(Text, nullable=False)
+    fiscal_period: Mapped[str | None] = mapped_column(Text, nullable=True)  # FY | Q1 | Q2 | Q3 | Q4
+    fiscal_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    period_end: Mapped[date | None] = mapped_column(Date, nullable=True)
+    filed_at: Mapped[date | None] = mapped_column(Date, nullable=True)
+    metric_canonical: Mapped[str] = mapped_column(Text, nullable=False)
+    xbrl_tag: Mapped[str] = mapped_column(Text, nullable=False)
+    value: Mapped[Decimal] = mapped_column(Numeric(30, 6), nullable=False)
+    unit: Mapped[str] = mapped_column(Text, nullable=False)

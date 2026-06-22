@@ -2,16 +2,19 @@
 
 Start with:  arq app.worker.WorkerSettings
 """
+import json
 import logging
 from datetime import UTC, datetime
 
 from arq.connections import RedisSettings
+from sqlalchemy import update
 
 from app.config import settings
 from app.db import AsyncSessionLocal
 from app.ingest.edgar import get_cik, list_filings as edgar_list_filings
 from app.ingest.pipeline import ingest_one_filing, upsert_company
-from app.models import IngestJob
+from app.ingest.xbrl import queue_missing_filings, seed_metric_dimensions, upsert_xbrl_facts
+from app.models import FinancialFact, IngestJob
 
 _logger = logging.getLogger(__name__)
 
@@ -28,7 +31,10 @@ async def ingest_filing_task(ctx: dict, job_row_id: int) -> None:
             return
         job.status = "running"
         job.started_at = datetime.now(UTC)
+        pending_fact_ids: list[int] = json.loads(job.pending_fact_ids or "[]")
         await session.commit()
+
+    arq_redis = ctx.get("redis")
 
     error: Exception | None = None
     try:
@@ -63,6 +69,29 @@ async def ingest_filing_task(ctx: dict, job_row_id: int) -> None:
                     job_row_id,
                     filing.id,
                 )
+
+            # XBRL ingestion — runs once per company, covers all historical periods.
+            await seed_metric_dimensions(session)
+            accession_fact_ids = await upsert_xbrl_facts(session, company, cik)
+            await session.commit()
+
+            # Backfill filing_id on facts that were waiting for this exact filing.
+            if filing is not None and pending_fact_ids:
+                await session.execute(
+                    update(FinancialFact)
+                    .where(FinancialFact.id.in_(pending_fact_ids))
+                    .values(filing_id=filing.id)
+                )
+                await session.commit()
+                _logger.info(
+                    "xbrl: backfilled filing_id=%d on %d financial_facts",
+                    filing.id, len(pending_fact_ids),
+                )
+
+            # Queue ingest jobs for any filings referenced by XBRL but not yet ingested.
+            if accession_fact_ids:
+                await queue_missing_filings(session, company, accession_fact_ids, arq_redis)
+                await session.commit()
 
     except Exception as exc:
         error = exc

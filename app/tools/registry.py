@@ -1,11 +1,13 @@
 """Tool-calling registry — Phase 5."""
 import asyncio
+import re
+from decimal import Decimal
 
 from sqlalchemy import func as sqlfunc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ingest.embed import embed_texts
-from app.models import Chunk, Company, Filing, IngestJob
+from app.models import Chunk, Company, Filing, FinancialFact, IngestJob
 from app.rag.hyde import generate_hypothetical_document
 from app.rag.retrieve import FilingFilter, retrieve
 from app.schemas import ChunkResult
@@ -130,6 +132,45 @@ TOOL_SCHEMAS: list[dict] = [
                 },
             },
             "required": ["job_id"],
+        },
+    },
+    {
+        "name": "get_financials",
+        "description": (
+            "Retrieve structured financial metrics for a company from XBRL data. "
+            "Returns canonical metrics (Revenue, NetIncome, EPSBasic, EPSDiluted, "
+            "OperatingCashFlow, CapEx, TotalAssets, Equity, SharesOutstanding, etc.) "
+            "with period, exact value, and accession citation. "
+            "Prefer this over search_filings for any numeric financial question — "
+            "it is faster and returns exact values. "
+            "Call ingest_filing first if no data is returned."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "ticker": {
+                    "type": "string",
+                    "description": "Stock ticker (e.g. 'AAPL'). Required.",
+                },
+                "metric": {
+                    "type": "string",
+                    "description": (
+                        "Canonical metric name to filter by. Examples: Revenue, NetIncome, "
+                        "GrossProfit, OperatingIncome, EPSBasic, EPSDiluted, "
+                        "OperatingCashFlow, CapEx, DnA, TotalAssets, TotalLiabilities, "
+                        "Equity, Cash, LongTermDebt, SharesOutstanding, Dividends. "
+                        "Omit to return all available metrics."
+                    ),
+                },
+                "period": {
+                    "type": "string",
+                    "description": (
+                        "Period filter. Examples: 'FY2023' for annual, 'Q1 2023' for quarterly. "
+                        "Omit to return all periods (most recent first)."
+                    ),
+                },
+            },
+            "required": ["ticker"],
         },
     },
     {
@@ -382,6 +423,108 @@ async def handle_get_filing(args: dict, session: AsyncSession) -> str:
     return "\n".join(lines)
 
 
+def _parse_period(period: str) -> tuple[str | None, int | None]:
+    """Parse 'FY2023' → ('FY', 2023) or 'Q1 2023' → ('Q1', 2023). Returns (None, None) on failure."""
+    period = period.strip()
+    m = re.fullmatch(r"(FY)(\d{4})", period, re.IGNORECASE)
+    if m:
+        return m.group(1).upper(), int(m.group(2))
+    m = re.fullmatch(r"(Q[1-4])\s*(\d{4})", period, re.IGNORECASE)
+    if m:
+        return m.group(1).upper(), int(m.group(2))
+    return None, None
+
+
+def _format_value(value: Decimal, unit: str) -> str:
+    v = float(value)
+    if unit == "USD":
+        abs_v = abs(v)
+        sign = "-" if v < 0 else ""
+        if abs_v >= 1e9:
+            return f"{sign}${abs_v / 1e9:.2f}B"
+        if abs_v >= 1e6:
+            return f"{sign}${abs_v / 1e6:.2f}M"
+        if abs_v >= 1e3:
+            return f"{sign}${abs_v / 1e3:.2f}K"
+        return f"{sign}${v:.2f}"
+    if unit == "USD/shares":
+        return f"${v:.4f}"
+    if unit == "shares":
+        abs_v = abs(v)
+        sign = "-" if v < 0 else ""
+        if abs_v >= 1e9:
+            return f"{sign}{abs_v / 1e9:.2f}B shares"
+        if abs_v >= 1e6:
+            return f"{sign}{abs_v / 1e6:.2f}M shares"
+        return f"{sign}{v:,.0f} shares"
+    return f"{v:g} {unit}"
+
+
+async def handle_get_financials(args: dict, session: AsyncSession) -> str:
+    ticker = str(args.get("ticker", "")).strip().upper()
+    if not ticker:
+        return "Error: 'ticker' is required."
+
+    company = await session.scalar(select(Company).where(Company.ticker == ticker))
+    if company is None:
+        return (
+            f"No company found for ticker '{ticker}'. "
+            "Use list_companies to see available tickers, or ingest_filing to index one."
+        )
+
+    stmt = (
+        select(FinancialFact)
+        .where(FinancialFact.company_id == company.id)
+        .order_by(
+            FinancialFact.fiscal_year.desc().nulls_last(),
+            FinancialFact.fiscal_period,
+            FinancialFact.metric_canonical,
+        )
+    )
+
+    metric = args.get("metric", "").strip() if args.get("metric") else None
+    if metric:
+        stmt = stmt.where(FinancialFact.metric_canonical == metric)
+
+    period = args.get("period", "").strip() if args.get("period") else None
+    if period:
+        fp, fy = _parse_period(period)
+        if fp:
+            stmt = stmt.where(FinancialFact.fiscal_period == fp)
+        if fy:
+            stmt = stmt.where(FinancialFact.fiscal_year == fy)
+
+    facts = (await session.execute(stmt)).scalars().all()
+
+    if not facts:
+        msg = f"No financial facts found for {ticker}"
+        if metric:
+            msg += f" metric='{metric}'"
+        if period:
+            msg += f" period='{period}'"
+        msg += (
+            ". The company may not have XBRL data ingested yet. "
+            "Try ingest_filing to trigger ingestion."
+        )
+        return msg
+
+    lines = [f"Financial facts for {ticker} — {company.name}:"]
+    for f in facts:
+        period_str = ""
+        if f.fiscal_period and f.fiscal_year:
+            period_str = f"{f.fiscal_period} FY{f.fiscal_year}"
+        elif f.fiscal_year:
+            period_str = f"FY{f.fiscal_year}"
+        val_str = _format_value(f.value, f.unit)
+        citation = f.accession or "—"
+        lines.append(
+            f"  {f.metric_canonical:<22} {period_str:<10} {val_str:<14} "
+            f"period_end={f.period_end}  filed={f.filed_at}  accession={citation}"
+        )
+
+    return "\n".join(lines)
+
+
 async def handle_ingest_filing(
     args: dict,
     session: AsyncSession,
@@ -552,6 +695,9 @@ async def dispatch(
         )
         chunk_accumulator.extend(new_chunks)
         return content
+
+    if tool_name == "get_financials":
+        return await handle_get_financials(args, session)
 
     if tool_name == "list_companies":
         return await handle_list_companies(session)
