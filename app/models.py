@@ -3,7 +3,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Index, Integer, Numeric, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Index, Integer, Numeric, Text, UniqueConstraint, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -58,7 +58,11 @@ class Filing(Base):
 
 class Chunk(Base):
     __tablename__ = "chunks"
-    __table_args__ = (Index("ix_chunks_filing_id", "filing_id"),)
+    __table_args__ = (
+        Index("ix_chunks_filing_id", "filing_id"),
+        Index("ix_chunks_item_number", "item_number", postgresql_where=text("item_number IS NOT NULL")),
+        Index("chunks_embedding_hnsw_idx", "embedding", postgresql_using="hnsw", postgresql_ops={"embedding": "vector_cosine_ops"}),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     filing_id: Mapped[int] = mapped_column(
